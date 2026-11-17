@@ -438,28 +438,72 @@ def render_rich_audit_report(
         )
     )
 
-    # 6. Claude-Code-Style Tinted Gutter Diff Viewer
+    # 6. Claude-Code-Style Tinted Gutter Diff Viewer (Real Line Numbers + Template Deduplication)
     if report.unified_diff_patch:
         diff_rows: list[str] = []
         inner_diff_w = TOTAL_WIDTH - 4
-        line_no = 1
-        for raw_line in report.unified_diff_patch.splitlines():
-            if raw_line.startswith("---") or raw_line.startswith("+++"):
-                diff_rows.append(f"{BOLD}{FG_WHITE}{raw_line}{RESET}")
-            elif raw_line.startswith("@@"):
-                line_no = 1
-                styled = pad_ansi(f" {FG_CYAN}{BOLD}{raw_line}{RESET}", inner_diff_w)
-                diff_rows.append(f"{DIFF_BG_HUNK}{styled}{RESET}")
-            elif raw_line.startswith("+"):
-                styled = pad_ansi(f" {G_GREEN}{BOLD}{line_no:>3} + │ {raw_line[1:]}{RESET}", inner_diff_w)
-                diff_rows.append(f"{DIFF_BG_ADD}{styled}{RESET}")
-                line_no += 1
-            elif raw_line.startswith("-"):
-                styled = pad_ansi(f" {G_RED}{line_no:>3} - │ {raw_line[1:]}{RESET}", inner_diff_w)
-                diff_rows.append(f"{DIFF_BG_DEL}{styled}{RESET}")
-            else:
-                diff_rows.append(f" {FG_MUTED}{line_no:>3}   │ {raw_line[:inner_diff_w - 10]}{RESET}")
-                line_no += 1
+        hunk_re = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+        # Split patch into per-file blocks (`--- a/...`)
+        file_blocks = [b for b in report.unified_diff_patch.split("\n\n") if b.strip()]
+        body_signature_counts: dict[str, list[str]] = {}
+        rendered_blocks: list[tuple[str, str, list[str]]] = []
+
+        for blk in file_blocks:
+            blk_lines = blk.splitlines()
+            if len(blk_lines) < 2:
+                continue
+            target_file = blk_lines[1].removeprefix("+++ b/").strip()
+            hunk_body = "\n".join(blk_lines[2:])
+            seen_list = body_signature_counts.setdefault(hunk_body, [])
+            seen_list.append(target_file)
+            if len(seen_list) <= 2:
+                rendered_blocks.append((target_file, hunk_body, blk_lines[2:]))
+
+        for idx_b, (target_file, _, body_lines) in enumerate(rendered_blocks):
+            if idx_b > 0:
+                diff_rows.append("")
+            file_hdr = pad_ansi(f" {G_BLUE}{BOLD}▸ {FG_WHITE}{target_file}{RESET}", inner_diff_w)
+            diff_rows.append(f"{DIFF_BG_HUNK}{file_hdr}{RESET}")
+
+            old_ln = 1
+            new_ln = 1
+            for raw_line in body_lines:
+                m_hunk = hunk_re.match(raw_line)
+                if m_hunk:
+                    old_ln = int(m_hunk.group(1))
+                    new_ln = int(m_hunk.group(2))
+                    diff_rows.append(f" {FG_CYAN}{DIM}{raw_line}{RESET}")
+                elif raw_line.startswith("+"):
+                    styled = pad_ansi(
+                        f" {G_GREEN}{BOLD}{new_ln:>4} + │ {raw_line[1:]}{RESET}", inner_diff_w
+                    )
+                    diff_rows.append(f"{DIFF_BG_ADD}{styled}{RESET}")
+                    new_ln += 1
+                elif raw_line.startswith("-"):
+                    styled = pad_ansi(
+                        f" {G_RED}{old_ln:>4} - │ {raw_line[1:]}{RESET}", inner_diff_w
+                    )
+                    diff_rows.append(f"{DIFF_BG_DEL}{styled}{RESET}")
+                    old_ln += 1
+                else:
+                    ctx_text = raw_line[1:] if raw_line.startswith(" ") else raw_line
+                    diff_rows.append(
+                        f" {FG_MUTED}{new_ln:>4}   │ {ctx_text[:inner_diff_w - 11]}{RESET}"
+                    )
+                    old_ln += 1
+                    new_ln += 1
+
+        # Summarize any collapsed identical boilerplate template diffs across monorepo subprojects
+        for _, matching_files in body_signature_counts.items():
+            if len(matching_files) > 2:
+                extra = matching_files[2:]
+                preview_names = ", ".join(p.split("/")[0] for p in extra[:4])
+                more_sfx = f" +{len(extra) - 4} more" if len(extra) > 4 else ""
+                diff_rows.append("")
+                diff_rows.append(
+                    f" {FG_CYAN}✦ Collapsed {len(extra)} identical template diffs ({preview_names}{more_sfx} — all included in .patch){RESET}"
+                )
 
         diff_rows.append("")
         if report.hitl_approved and report.written_patch_path:
@@ -588,5 +632,34 @@ def run_interactive_terminal_repl(scan_callback: Callable[[str, bool, bool], int
             scan_callback(parts[1] if len(parts) > 1 else "./examples", False, False)
             continue
 
-        # Treat bare input path as a scan target
-        scan_callback(raw, False, False)
+        # Smartly handle full CLI commands pasted inside the interactive `╰─✦ ❯` prompt
+        cleaned_raw = raw
+        for prefix in ("python -m mcpguard_adk.cli", "python3 -m mcpguard_adk.cli", "mcpguard"):
+            if cleaned_raw.lower().startswith(prefix):
+                cleaned_raw = cleaned_raw[len(prefix) :].strip()
+                break
+        if cleaned_raw.lower().startswith("scan "):
+            cleaned_raw = cleaned_raw[5:].strip()
+        elif cleaned_raw.lower() == "scan":
+            cleaned_raw = "./examples"
+
+        live_in_cmd = "--live" in cleaned_raw
+        approve_in_cmd = "--approve-patches" in cleaned_raw
+        # Strip CLI flags to isolate the target path
+        path_tokens = [tok for tok in cleaned_raw.split() if not tok.startswith("--")]
+        target_candidate = " ".join(path_tokens).strip().strip('"').strip("'") or "./examples"
+
+        if not Path(target_candidate).exists():
+            print(
+                render_closed_box(
+                    "⚠ Target Path Not Found",
+                    [
+                        f"{G_YELLOW}Could not find folder or file:{RESET} {FG_WHITE}{target_candidate}{RESET}",
+                        f"{FG_MUTED}Tip: Inside `╰─✦ ❯`, type {BOLD}{G_GREEN}/react{RESET}{FG_MUTED} or just {BOLD}{FG_WHITE}D:\\React{RESET}{FG_MUTED} directly!{RESET}",
+                    ],
+                    border_color=G_YELLOW,
+                )
+            )
+            continue
+
+        scan_callback(target_candidate, approve_in_cmd, live_in_cmd)

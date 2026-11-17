@@ -1,8 +1,8 @@
 """Stage 5: HITL Confirmation Gate, Real File-Aware Unified Diff Emitter & Patch Writer.
 
 Uses Python's `difflib.unified_diff` against actual file contents on disk to synthesize
-reviewable Git patches.
-- When `hitl_approved=False` (default): pauses mutation and only previews the diff.
+`git apply`-compatible patches with workspace-relative paths (`a/subproject/src/...`).
+- When `hitl_approved=False` (default): pauses mutation and previews the diff.
 - When `hitl_approved=True` (`--approve-patches`): writes the `git apply`-compatible patch
   artifact to `reports/hardened_remediation.patch` (or custom `patch_output_path`).
 """
@@ -21,7 +21,7 @@ SECRET_ENV_KEY_WORDS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
 
 
 def _remediate_file_content(file_path: Path) -> tuple[list[str], list[str]] | None:
-    """Compute (original_lines, hardened_lines) for a real file on disk."""
+    """Compute (original_lines, hardened_lines) for a real file on disk using valid syntax."""
     try:
         raw_text = file_path.read_text(encoding="utf-8", errors="ignore")
     except Exception:
@@ -30,6 +30,7 @@ def _remediate_file_content(file_path: Path) -> tuple[list[str], list[str]] | No
     orig_lines = raw_text.splitlines()
     name_lower = file_path.name.lower()
 
+    # 1. MCP JSON configuration files
     if name_lower.endswith(".json"):
         try:
             data = json.loads(raw_text)
@@ -86,33 +87,44 @@ def _remediate_file_content(file_path: Path) -> tuple[list[str], list[str]] | No
         new_lines = json.dumps(data, indent=2).splitlines()
         return orig_lines, new_lines
 
+    # 2. React / TypeScript / JavaScript files (valid JSX expression annotation / DOMPurify)
     if name_lower.endswith((".js", ".jsx", ".ts", ".tsx")):
         new_lines = []
         mutated = False
         for line in orig_lines:
-            if "dangerouslySetInnerHTML" in line and "DOMPurify" not in line:
-                indent = line[: len(line) - len(line.lstrip())]
-                new_lines.append(
-                    f"{indent}/* [MCPGuard-ADK MCPG-SEC-004] Sanitize untrusted HTML/CSS before injection */"
+            if "dangerouslySetInnerHTML={{" in line and "MCPGuard-ADK" not in line and "DOMPurify" not in line:
+                fixed = line.replace(
+                    "dangerouslySetInnerHTML={{",
+                    "dangerouslySetInnerHTML={{ /* [MCPGuard-ADK: sanitize via DOMPurify.sanitize()] */",
                 )
-                new_lines.append(line)
+                new_lines.append(fixed)
+                mutated = True
+            elif "eval(" in line and "MCPGuard-ADK" not in line:
+                new_lines.append(f"{line}  // [MCPGuard-ADK: replace eval() with JSON.parse()]")
                 mutated = True
             else:
                 new_lines.append(line)
         return (orig_lines, new_lines) if mutated else None
 
+    # 3. Python ADK agent files (only remediate real code statements, never string literals)
     if name_lower.endswith(".py"):
         new_lines = []
         mutated = False
         for line in orig_lines:
-            if "McpToolset(" in line and "tool_filter" not in line:
+            stripped = line.strip()
+            if (
+                "McpToolset(" in line
+                and "tool_filter" not in line
+                and not stripped.startswith(('"', "'", "#"))
+                and ".replace(" not in line
+            ):
                 fixed = line.replace(
                     "McpToolset(",
                     "McpToolset(tool_filter=['list_directory', 'read_file'], ",
                 )
                 new_lines.append(fixed)
                 mutated = True
-            elif 'model = "gemini-3.1-pro-preview"' in line:
+            elif stripped == 'model = "gemini-3.1-pro-preview"':
                 new_lines.append(
                     line.replace(
                         'model = "gemini-3.1-pro-preview"',
@@ -127,11 +139,15 @@ def _remediate_file_content(file_path: Path) -> tuple[list[str], list[str]] | No
     return None
 
 
-def build_hardened_unified_diff(findings: list[AuditFinding]) -> str:
-    """Synthesize real `difflib.unified_diff` patches across all flagged files."""
+def build_hardened_unified_diff(
+    findings: list[AuditFinding],
+    base_path: str | Path | None = None,
+) -> str:
+    """Synthesize `git apply`-ready `difflib.unified_diff` patches with workspace-relative paths."""
     if not findings:
         return ""
 
+    resolved_base = Path(base_path).resolve() if base_path else None
     diff_blocks: list[str] = []
     seen_files: set[str] = set()
 
@@ -140,16 +156,26 @@ def build_hardened_unified_diff(findings: list[AuditFinding]) -> str:
             continue
         seen_files.add(finding.file_path)
 
-        fpath = Path(finding.file_path)
+        fpath = Path(finding.file_path).resolve()
         remediated = _remediate_file_content(fpath)
         if remediated is not None:
             orig_lines, new_lines = remediated
+            rel_label = fpath.name
+            if resolved_base is not None:
+                if resolved_base.is_file():
+                    rel_label = fpath.name
+                else:
+                    try:
+                        rel_label = str(fpath.relative_to(resolved_base)).replace("\\", "/")
+                    except ValueError:
+                        rel_label = fpath.name
+
             diff = list(
                 difflib.unified_diff(
                     orig_lines,
                     new_lines,
-                    fromfile=f"a/{fpath.name}",
-                    tofile=f"b/{fpath.name}",
+                    fromfile=f"a/{rel_label}",
+                    tofile=f"b/{rel_label}",
                     lineterm="",
                 )
             )
@@ -225,9 +251,10 @@ def run_hitl_patch_emitter_node(
     findings: list[AuditFinding],
     hitl_approved: bool = False,
     patch_output_path: str | Path | None = None,
+    base_path: str | Path | None = None,
 ) -> tuple[str, dict[str, Any], str | None]:
     """Run Stage 5 HITL gate; write `.patch` artifact to disk ONLY when `hitl_approved=True`."""
-    unified_diff = build_hardened_unified_diff(findings)
+    unified_diff = build_hardened_unified_diff(findings, base_path=base_path)
     test_fixture = build_adk_regression_test_fixture(findings)
     written_patch_file: str | None = None
 

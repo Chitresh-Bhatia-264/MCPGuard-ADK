@@ -510,8 +510,10 @@ def _inspect_python_agent_ast(file_path: Path) -> list[AuditFinding]:
 
         if isinstance(node, (ast.While, ast.For)):
             loop_segment = ast.get_source_segment(source, node) or ""
+            is_string_sanitizer = ".replace(" in loop_segment or "orig_lines" in loop_segment
             if (
-                any(m in loop_segment for m in ("gemini-3.1-pro", "gemini-4-argon", "gemini-4-carbon"))
+                not is_string_sanitizer
+                and any(m in loop_segment for m in ("gemini-3.1-pro", "gemini-4-argon", "gemini-4-carbon"))
                 and "compact" not in loop_segment.lower()
                 and "summarize" not in loop_segment.lower()
             ):

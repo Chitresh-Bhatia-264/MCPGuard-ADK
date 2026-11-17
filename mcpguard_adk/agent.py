@@ -275,6 +275,7 @@ class MCPGuardGraphWorkflow:
                     aggregated_findings,
                     hitl_approved=hitl_approved,
                     patch_output_path=patch_output_path,
+                    base_path=target_path,
                 )
 
             cost_summary = simulate_pr_audit_benchmarks(pr_count=1000)

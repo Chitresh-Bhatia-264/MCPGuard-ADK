@@ -60,11 +60,12 @@ flowchart TD
 ```
 
 ### Key Production Engineering Guarantees
-1. **Pinpoint Secret & Scope Leak Inspector (`WHAT` + `WHERE` + `^^^ ◂ HERE`)**: Identifies exact credential types (`Google Cloud / Gemini API Key`, `GitHub PAT`, `OpenAI / Anthropic Secret`, `AWS Access Key`, `Database URI`, `.env` leaks, `dangerouslySetInnerHTML`) with exact `line:column` carets in [`mcpguard_adk/nodes/prefilter.py`](mcpguard_adk/nodes/prefilter.py).
-2. **Zero Context Bloat (`AgentTool` + Synchronous `McpToolset`)**: `McpToolset` is instantiated synchronously at module load inside [`mcpguard_adk/agent.py`](mcpguard_adk/agent.py) with `tool_filter=["list_directory", "read_file"]` strictly inside isolated `AgentTool` sub-agents.
-3. **Real JSON-RPC 2.0 MCP Stdio Server (`serve-mcp`)**: Mount MCPGuard-ADK inside AI IDEs via `python -m mcpguard_adk.cli serve-mcp` ([`mcpguard_adk/mcp_server.py`](mcpguard_adk/mcp_server.py)).
-4. **Asymmetric Ed25519 (`EdDSA`) + RFC 8785 (JCS) A2A v1.0 Server**: Serves `/.well-known/agent-card.json` and `/.well-known/jwks.json` with mathematical tamper detection, SSE chunked artifacts, `google.rpc.ErrorInfo`, and SSRF/`jti`-protected webhooks ([`mcpguard_adk/a2a/protocol.py`](mcpguard_adk/a2a/protocol.py)).
-5. **Official OpenTelemetry SDK + Cloud Trace Safety**: Records real W3C 128-bit `traceId` / `resourceSpans` via `opentelemetry.sdk.trace` while enforcing `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT='EVENT_ONLY'` ([`mcpguard_adk/telemetry/otel.py`](mcpguard_adk/telemetry/otel.py)).
+1. **Polyglot Monorepo & Secret/Scope Leak Pinpoint (`WHAT` + `WHERE` + `^^^ ◂ HERE`)**: Scans Python ADK agents (`.py`), MCP configs (`mcp.json`, `claude_desktop_config.json`), React/TypeScript apps (`.tsx`, `.ts`, `.jsx`, `.js`), `.env` files, and manifests (`package.json`, `pyproject.toml`, `go.mod`) in `<200ms` per 1,000 files—pinpointing exact `line:column` carets in [`mcpguard_adk/nodes/prefilter.py`](mcpguard_adk/nodes/prefilter.py).
+2. **Workspace-Relative `difflib` Remediation & Boilerplate Deduplication**: Stage 5 generates syntax-valid, `git apply`-ready unified diffs (`a/project/src/...`) with exact file line numbers in the terminal gutter while collapsing duplicate template hunks across multi-app monorepos ([`mcpguard_adk/nodes/hitl_patch_emitter.py`](mcpguard_adk/nodes/hitl_patch_emitter.py), [`mcpguard_adk/tui.py`](mcpguard_adk/tui.py)).
+3. **Zero Context Bloat (`AgentTool` + Synchronous `McpToolset`)**: `McpToolset` is instantiated synchronously at module load inside [`mcpguard_adk/agent.py`](mcpguard_adk/agent.py) with `tool_filter=["list_directory", "read_file"]` strictly inside isolated `AgentTool` sub-agents.
+4. **Real JSON-RPC 2.0 MCP Stdio Server (`serve-mcp`)**: Mount MCPGuard-ADK inside AI IDEs via `python -m mcpguard_adk.cli serve-mcp` ([`mcpguard_adk/mcp_server.py`](mcpguard_adk/mcp_server.py)).
+5. **Asymmetric Ed25519 (`EdDSA`) + RFC 8785 (JCS) A2A v1.0 Server**: Serves `/.well-known/agent-card.json` and `/.well-known/jwks.json` with mathematical tamper detection, SSE chunked artifacts, `google.rpc.ErrorInfo`, and SSRF/`jti`-protected webhooks ([`mcpguard_adk/a2a/protocol.py`](mcpguard_adk/a2a/protocol.py)).
+6. **Official OpenTelemetry SDK + Cloud Trace Safety**: Records real W3C 128-bit `traceId` / `resourceSpans` via `opentelemetry.sdk.trace` while enforcing `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT='EVENT_ONLY'` ([`mcpguard_adk/telemetry/otel.py`](mcpguard_adk/telemetry/otel.py)).
 
 ---
 

@@ -132,6 +132,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Default or `scan`
     target = getattr(args, "target", "./examples")
+    if not Path(target).exists():
+        print(f"Error: Target path '{target}' does not exist.", file=sys.stderr)
+        return 1
     git_diff_only = getattr(args, "git_diff", False)
     approve = getattr(args, "approve_patches", False)
     emit_test_path = getattr(args, "emit_test_json", "")
