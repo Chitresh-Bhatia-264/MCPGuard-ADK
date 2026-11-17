@@ -1,0 +1,66 @@
+# ============================================================================
+# 1. Secrets & Credentials (NEVER commit)
+# ============================================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+service-account*.json
+
+# ============================================================================
+# 2. Local Scan Outputs, Reports, Posters & Marketing/LinkedIn Drafts
+# ============================================================================
+reports/
+marketing/
+notes/
+scratch/
+*linkedin*
+*LINKEDIN*
+*PLAYBOOK*
+*playbook*
+*poster*.html
+*.patch
+*.sarif
+*.sarif.json
+*.bak
+*.tmp
+*.log
+
+# ============================================================================
+# 3. Python Bytecode, Packaging & Virtual Environments
+# ============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+ENV/
+
+# ============================================================================
+# 4. Test, Linter & Type-Checker Caches
+# ============================================================================
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ============================================================================
+# 5. IDE, Editor & OS Metadata
+# ============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,8 @@
+{
+  "name": "sample-clean-service",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "opentelemetry-api": "^1.27.0"
+  }
+}

@@ -1,0 +1,27 @@
+# MCPGuard-ADK
+
+> Open-source multi-agent Model Context Protocol (MCP) supply-chain, >200K token cost-cliff, and tool-trajectory auditor built on Google Agent Development Kit (ADK) 2.0, Agent2Agent (A2A) Protocol v1.0, and OpenTelemetry.
+
+## Upstream Reference
+- Google ADK Full Documentation Index: https://adk.dev/llms-full.txt
+- Scaffolding CLI (replaces archived `agent-starter-pack` as of Nov 15, 2026): `uvx google-agents-cli create`
+
+## Repository Architecture & Conventions for AI Code Editors
+1. **Stage 1 - Deterministic Manifest & AST Pre-Filter (`mcpguard_adk/nodes/prefilter.py`)**:
+   - Runs as a pure Python ADK 2.0 Graph Workflow code node (`0` LLM tokens).
+   - Inspects `package.json`, `pyproject.toml`, `go.mod`, MCP server configs (`mcp.json`, `.cursor/mcp.json`, `claude_desktop_config.json`), and Python agent source files.
+   - Skips clean/unchanged files before invoking any LLM.
+2. **Stage 2 - Diff & Risk Triage Router (`mcpguard_adk/nodes/triage_router.py`)**:
+   - Routes findings using `gemini-3.1-flash-lite` ($0.25/1M input, $1.50/1M output) into `SECURITY`, `COST_CLIFF`, `TRAJECTORY_DRIFT`, or `DEFAULT_ROUTE`.
+3. **Stage 3 - Context-Isolated Security & MCP Auditor (`mcpguard_adk/agents/security_auditor.py`)**:
+   - Wraps sub-agent inside `AgentTool` with `McpToolset` initialized synchronously inside `mcpguard_adk/agent.py` using `StdioConnectionParams` wrapping `StdioServerParameters` and strict `tool_filter=["list_directory", "read_file"]`.
+   - Never attach `McpToolset` directly to the root orchestrator (prevents >20 tool schema bloat and raw file blob pollution).
+4. **Stage 4 - Cost & Trajectory Optimizer (`mcpguard_adk/agents/cost_optimizer.py`)**:
+   - Detects uncompacted loops exceeding the 200,000-token Gemini 3.1 Pro pricing cliff ($2.00 -> $4.00/1M input, $12.00 -> $18.00/1M output), thinking-token cost amplification, and suboptimal context cache TTLs.
+   - Emits `.test.json` regression fixtures for `adk eval` and `adk conformance test`.
+5. **Stage 5 - HITL Gate & Patch Emitter (`mcpguard_adk/nodes/hitl_patch_emitter.py`)**:
+   - Enforces an ADK Human-in-the-Loop confirmation pause before mutating files or emitting unified diffs and A2A artifacts.
+6. **Stage 6 - Voice Incident Debrief (`mcpguard_adk/agents/voice_debrief.py`)**:
+   - Optional `--live` speech-to-speech mode using `runner.run_live()` and `LiveRequestQueue`.
+7. **A2A Protocol v1.0 Server (`mcpguard_adk/a2a/`)**:
+   - Serves RFC 8785 (JCS) + RFC 7515 (JWS) signed `/.well-known/agent-card.json` with `AgentCapabilities(streaming=True, pushNotifications=True, extendedAgentCard=True)`, `supportedInterfaces[]` (`protocolVersion: "1.0"`), unified `Part` (`text`, `raw`, `url`, `data` member `oneof`), SSE `SendStreamingMessage`, `google.rpc.Status` + `google.rpc.ErrorInfo` (`domain: "a2a-protocol.org"`), and SSRF-safe + replay-protected (`jti`) `TaskPushNotificationConfig` webhooks.

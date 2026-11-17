@@ -1,0 +1,68 @@
+{
+  "eval_set_id": "mcpguard_unit_regression",
+  "name": "MCPGuard-ADK Unit Trajectory & Patch Fixture",
+  "metrics": [
+    "rubric_based_tool_use_quality_v1",
+    "final_response_match_v2",
+    "hallucinations_v1",
+    "safety_v1",
+    "tool_call_count_v1",
+    "token_usage_v1",
+    "invocation_duration_v1"
+  ],
+  "eval_cases": [
+    {
+      "eval_id": "catch_overbroad_mcp_and_200k_pro_cliff",
+      "conversation": [
+        {
+          "invocation_id": "unit-1",
+          "user_content": {
+            "parts": [
+              {
+                "text": "Scan ./examples for MCP supply-chain vulnerabilities and >200K token cost cliffs."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "stage_1_manifest_and_ast_prefilter",
+                "args": {
+                  "target_path": "./examples",
+                  "llm_tokens_consumed": 0
+                }
+              },
+              {
+                "name": "stage_2_diff_and_risk_triage_router",
+                "args": {
+                  "model": "gemini-3.1-flash-lite",
+                  "routes": ["SECURITY", "COST_CLIFF", "TRAJECTORY_DRIFT"]
+                }
+              },
+              {
+                "name": "stage_3_security_and_mcp_auditor_agent_tool",
+                "args": {
+                  "isolated_context": true,
+                  "tool_filter": ["list_directory", "read_file"]
+                }
+              },
+              {
+                "name": "stage_4_cost_and_trajectory_optimizer_agent_tool",
+                "args": {
+                  "isolated_context": true
+                }
+              }
+            ]
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "Detected MCPG-SEC-001, MCPG-SEC-002, MCPG-SEC-003, MCPG-SEC-004, MCPG-SEC-005, MCPG-ADK-001, MCPG-ADK-002, MCPG-COST-001; paused at Stage 5 HITL gate."
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

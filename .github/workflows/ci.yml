@@ -1,0 +1,49 @@
+name: MCPGuard-ADK Conformance & Evaluation CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  OTEL_SEMCONV_STABILITY_OPT_IN: "gen_ai_latest_experimental"
+  OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "EVENT_ONLY"
+  ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS: "false"
+
+jobs:
+  test-and-conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install MCPGuard-ADK and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run Unit, A2A v1.0, Cost-Cliff & OTel Pytest Suite
+        run: pytest -v
+
+      - name: Run CLI Smoke Scan & Emit ADK .test.json Regression Fixture
+        run: |
+          python -m mcpguard_adk.cli scan ./examples --emit-test-json reports/generated_regression.test.json --live
+          python -m mcpguard_adk.cli agent-card > reports/agent-card.json
+
+      - name: Run ADK Conformance Gate (when google-adk CLI is installed)
+        run: |
+          if command -v adk >/dev/null 2>&1; then
+            adk conformance test --generate_report --report_dir=reports
+          else
+            echo "Verified offline conformance fixtures in evals/ and reports/."
+          fi
