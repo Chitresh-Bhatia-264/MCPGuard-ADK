@@ -71,6 +71,26 @@ RATE_CARDS_2026: dict[str, ModelRateCard] = {
         cache_storage_per_1m_per_hour=4.50,
         notes="2x input ($4.00) and 1.5x output ($18.00) pricing cliff when prompt > 200,000 tokens.",
     ),
+    "gemini-4-hydrogen": ModelRateCard(
+        model_id="gemini-4-hydrogen",
+        input_per_1m_le_200k=0.30,
+        output_per_1m_le_200k=1.50,
+        input_per_1m_gt_200k=0.30,
+        output_per_1m_gt_200k=1.50,
+        cache_read_per_1m=0.03,
+        cache_storage_per_1m_per_hour=0.25,
+        notes="Gemini 4 Hydrogen high-throughput Flash/Lite tier; flat rate across 1M context.",
+    ),
+    "gemini-4-argon": ModelRateCard(
+        model_id="gemini-4-argon",
+        input_per_1m_le_200k=2.00,
+        output_per_1m_le_200k=10.00,
+        input_per_1m_gt_200k=4.00,
+        output_per_1m_gt_200k=20.00,
+        cache_read_per_1m=0.20,
+        cache_storage_per_1m_per_hour=4.50,
+        notes="Gemini 4 Argon balanced reasoning tier ($2/$10 API, $2/$11 Vertex promo).",
+    ),
     "gemini-4-argon-2026-promo": ModelRateCard(
         model_id="gemini-4-argon-2026-promo",
         input_per_1m_le_200k=2.00,
@@ -90,6 +110,16 @@ RATE_CARDS_2026: dict[str, ModelRateCard] = {
         cache_read_per_1m=0.40,
         cache_storage_per_1m_per_hour=4.50,
         notes="Post-introductory rate effective Dec 1, 2026 ($20 API / $22 Vertex).",
+    ),
+    "gemini-4-carbon": ModelRateCard(
+        model_id="gemini-4-carbon",
+        input_per_1m_le_200k=2.00,
+        output_per_1m_le_200k=11.00,
+        input_per_1m_gt_200k=4.00,
+        output_per_1m_gt_200k=22.00,
+        cache_read_per_1m=0.20,
+        cache_storage_per_1m_per_hour=4.50,
+        notes="Gemini 4 Carbon frontier deep-reasoning tier ($11 Vertex promo; steps up Dec 1, 2026).",
     ),
 }
 
