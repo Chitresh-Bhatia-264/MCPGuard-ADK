@@ -203,6 +203,9 @@ MCPGuard-ADK/
 
 ---
 
+<img width="1266" height="256" alt="image" src="https://github.com/user-attachments/assets/a4a1a686-225c-49a9-8d8e-cb2633d88409" />
+
+
 ## License & Contributing
 
 - **License**: [Apache License 2.0](LICENSE)
