@@ -33,6 +33,7 @@ jobs:
     name: Publish to PyPI via Trusted Publisher (OIDC)
     needs: [build-dist]
     if: github.event_name == 'release'
+    continue-on-error: true
     runs-on: ubuntu-latest
     environment:
       name: pypi
