@@ -61,3 +61,28 @@ def test_context_caching_storage_roi_breakeven() -> None:
         reads_per_hour=10.0,
     )
     assert high_freq_flash["is_profitable"] is True
+
+
+def test_gemini_4_hydrogen_argon_carbon_tiering_and_rate_cards(monkeypatch: object) -> None:
+    from pathlib import Path
+    from mcpguard_adk.agent import MCPGuardGraphWorkflow
+
+    # Hydrogen flat rate: (0.25 * 0.30) + (0.008 * 1.50) = 0.075 + 0.012 = $0.087 (no >200K cliff!)
+    assert compute_turn_cost_usd("gemini-4-hydrogen", 250_000, 8_000) == 0.087
+    # Argon >200K cliff: (0.25 * 4.00) + (0.008 * 20.00) = 1.00 + 0.16 = $1.16
+    assert compute_turn_cost_usd("gemini-4-argon", 250_000, 8_000) == 1.16
+    # Carbon >200K cliff: (0.25 * 4.00) + (0.008 * 22.00) = 1.00 + 0.176 = $1.176
+    assert compute_turn_cost_usd("gemini-4-carbon", 250_000, 8_000) == 1.176
+
+    # Verify workflow honors Gemini 4 Hydrogen / Argon / Carbon env overrides end-to-end
+    mp = monkeypatch  # type: ignore[assignment]
+    mp.setenv("MCPGUARD_TRIAGE_MODEL", "gemini-4-hydrogen")
+    mp.setenv("MCPGUARD_AUDIT_MODEL", "gemini-4-argon")
+    mp.setenv("MCPGUARD_ESCALATION_MODEL", "gemini-4-carbon")
+
+    examples_dir = Path(__file__).resolve().parent.parent / "examples"
+    rep = MCPGuardGraphWorkflow().run(examples_dir)
+    assert "gemini-4-hydrogen" in rep.triage.model_used
+    models_in_spans = {sp["gen_ai.request.model"] for sp in rep.otel_Waterfall_spans}
+    assert "gemini-4-argon" in models_in_spans
+    assert "gemini-4-carbon" in models_in_spans
