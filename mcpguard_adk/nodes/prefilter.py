@@ -27,14 +27,14 @@ from mcpguard_adk.schemas import (
 )
 
 NAMED_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("Google Cloud / Gemini API Key", re.compile(r"(AIza[0-9A-Za-z\-_]{20,})")),
-    ("GitHub Personal Access Token", re.compile(r"((?:ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{20,}|github_pat_[0-9A-Za-z_]{25,})")),
-    ("Anthropic API Secret Key", re.compile(r"(sk-ant-[0-9A-Za-z\-_]{20,})")),
-    ("OpenAI / LLM API Secret Key", re.compile(r"(sk-(?!ant-)[0-9A-Za-z\-_]{20,})")),
-    ("AWS Access Key ID", re.compile(r"(AKIA[0-9A-Z]{16})")),
-    ("Stripe Live Secret Key", re.compile(r"(sk_live_[0-9A-Za-z]{16,})")),
-    ("Slack Bot / User Token", re.compile(r"(xox[baprs]-[0-9A-Za-z\-]{10,})")),
-    ("Database URI with Password", re.compile(r"((?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis)://[^/\s:@]+:[^/\s@]+@[^\s\"']+)")),
+    ("Google Cloud / Gemini API Key", re.compile(r"(?<![A-Za-z0-9_\-])(AIza[0-9A-Za-z\-_]{20,})")),
+    ("GitHub Personal Access Token", re.compile(r"(?<![A-Za-z0-9_\-])((?:ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{20,}|github_pat_[0-9A-Za-z_]{25,})")),
+    ("Anthropic API Secret Key", re.compile(r"(?<![A-Za-z0-9_\-])(sk-ant-[0-9A-Za-z\-_]{20,})")),
+    ("OpenAI / LLM API Secret Key", re.compile(r"(?<![A-Za-z0-9_\-])(sk-(?!ant-)[0-9A-Za-z\-_]{20,})")),
+    ("AWS Access Key ID", re.compile(r"(?<![A-Za-z0-9_\-])(AKIA[0-9A-Z]{16})")),
+    ("Stripe Live Secret Key", re.compile(r"(?<![A-Za-z0-9_\-])(sk_live_[0-9A-Za-z]{16,})")),
+    ("Slack Bot / User Token", re.compile(r"(?<![A-Za-z0-9_\-])(xox[baprs]-[0-9A-Za-z\-]{10,})")),
+    ("Database URI with Password", re.compile(r"((?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis)://[^/\s:@\[]+:[^/\s@*\]]+@[^\s\"'`\)]+)")),
 ]
 
 PROMPT_INJECTION_PATTERNS = [
@@ -73,6 +73,9 @@ IGNORED_DIRS = {
     "coverage",
     "out",
     ".cache",
+    "tests",
+    "__tests__",
+    "unittests",
 }
 
 
@@ -122,11 +125,22 @@ def _locate_token_in_lines(
 
 
 def _match_secret_type(val_str: str) -> tuple[str, str] | None:
-    """Return `(secret_provider_name, matched_literal)` if `val_str` matches a known secret."""
+    """Return `(secret_provider_name, matched_literal)` if `val_str` matches a real secret."""
     for label, pat in NAMED_SECRET_PATTERNS:
         m = pat.search(val_str)
-        if m:
-            return label, m.group(1)
+        if not m:
+            continue
+        tok = m.group(1)
+        if tok.startswith("sk-"):
+            # Reject lowercase English kebab-case prose/placeholders (`sk-my-api-key`, `sk-live-should-not-appear`)
+            suffix = tok[3:]
+            if not any(ch.isdigit() or ch.isupper() for ch in suffix):
+                continue
+        if "://" in tok and "@" in tok:
+            creds = tok.split("://", 1)[1].split("@", 1)[0].lower()
+            if creds in {"user:pass", "user:password", "user:secret", "username:password", "u:secret"}:
+                continue
+        return label, tok
     return None
 
 
@@ -384,9 +398,22 @@ def _inspect_python_agent_ast(file_path: Path) -> list[AuditFinding]:
     except Exception:
         return findings
 
+    # Ignore Python docstring line spans when checking raw source lines for hardcoded credentials
+    docstring_lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first_stmt = node.body[0]
+            if (
+                isinstance(first_stmt, ast.Expr)
+                and isinstance(first_stmt.value, ast.Constant)
+                and isinstance(first_stmt.value.value, str)
+            ):
+                for d_ln in range(first_stmt.lineno, getattr(first_stmt, "end_lineno", first_stmt.lineno) + 1):
+                    docstring_lines.add(d_ln)
+
     # Also scan Python source lines for hardcoded API keys
     for idx, line in enumerate(lines, start=1):
-        if "re.compile" in line:
+        if idx in docstring_lines or "re.compile" in line:
             continue
         hit = _match_secret_type(line)
         if hit:
@@ -415,6 +442,7 @@ def _inspect_python_agent_ast(file_path: Path) -> list[AuditFinding]:
             )
 
     has_mcp_toolset = False
+    mcp_toolset_line = 1
     has_agent_tool_wrapper = "AgentTool" in source
     has_tool_filter = "tool_filter" in source
 
@@ -453,6 +481,7 @@ def _inspect_python_agent_ast(file_path: Path) -> list[AuditFinding]:
             func_name = getattr(node.func, "id", "") or getattr(node.func, "attr", "")
             if func_name == "McpToolset":
                 has_mcp_toolset = True
+                mcp_toolset_line = getattr(node, "lineno", 1)
                 kw_names = {kw.arg for kw in node.keywords if kw.arg}
                 if "tool_filter" not in kw_names:
                     ln = getattr(node, "lineno", 1)
@@ -545,13 +574,17 @@ def _inspect_python_agent_ast(file_path: Path) -> list[AuditFinding]:
                 )
 
     if has_mcp_toolset and not has_agent_tool_wrapper and has_tool_filter:
+        b_ctx, s_line, a_ctx = _extract_line_context(lines, mcp_toolset_line)
         findings.append(
             AuditFinding(
                 rule_id="MCPG-ADK-003",
                 category=FindingCategory.MCP_CONTEXT_BLOAT_ROOT_TOOLSET,
                 severity=FindingSeverity.MEDIUM,
                 file_path=str(file_path),
-                line_number=1,
+                line_number=mcp_toolset_line,
+                source_line=s_line,
+                context_before=b_ctx,
+                context_after=a_ctx,
                 leak_type="Root Context Pollution",
                 leaked_evidence="McpToolset bound without AgentTool wrapper",
                 title="`McpToolset` attached directly to root agent instead of isolated `AgentTool`",
@@ -575,14 +608,23 @@ def _inspect_package_json(file_path: Path) -> list[AuditFinding]:
     if not isinstance(data, dict):
         return findings
 
+    has_workspaces = bool(data.get("workspaces"))
+    root_name = str(data.get("name", ""))
+    own_scope = root_name.split("/", 1)[0] + "/" if root_name.startswith("@") and "/" in root_name else ""
+
     for section in ("dependencies", "devDependencies"):
         deps = data.get(section, {})
         if not isinstance(deps, dict):
             continue
         for pkg, ver in deps.items():
             ver_str = str(ver).strip()
+            # Skip npm/yarn/pnpm monorepo workspace sibling links (`"@scope/sibling": "*"` inside `workspaces`)
+            if ver_str == "*" and has_workspaces and (
+                (own_scope and pkg.startswith(own_scope)) or pkg.startswith("@modelcontextprotocol/")
+            ):
+                continue
             if ver_str in {"*", "latest", "next"} or ver_str.startswith("http:") or ver_str.startswith("git+http:"):
-                ln, c1, c2 = _locate_token_in_lines(lines, ver_str, fallback_key=pkg)
+                ln, c1, c2 = _locate_token_in_lines(lines, f'"{pkg}"', fallback_key=pkg)
                 b_ctx, s_line, a_ctx = _extract_line_context(lines, ln)
                 findings.append(
                     AuditFinding(
@@ -752,25 +794,68 @@ def _inspect_js_ts_react_file(file_path: Path) -> list[AuditFinding]:
 
 def _resolve_git_changed_files(target_dir: Path) -> set[Path] | None:
     try:
-        proc = subprocess.run(
-            ["git", "-C", str(target_dir), "status", "--porcelain"],
+        top_proc = subprocess.run(
+            ["git", "-C", str(target_dir), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
         )
-        if proc.returncode != 0:
+        if top_proc.returncode != 0:
             return None
+        repo_root = Path(top_proc.stdout.strip()).resolve()
         changed: set[Path] = set()
-        for raw in proc.stdout.splitlines():
-            if len(raw) < 4:
-                continue
-            rel = raw[3:].strip().strip('"')
-            if " -> " in rel:
-                rel = rel.split(" -> ", 1)[1].strip('"')
-            full = (target_dir / rel).resolve()
-            if full.is_file():
-                changed.add(full)
+
+        def _collect_diff_paths(args: list[str]) -> bool:
+            p = subprocess.run(
+                ["git", "-C", str(repo_root), *args],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if p.returncode != 0:
+                return False
+            for line in p.stdout.splitlines():
+                rel_p = line.strip().strip('"')
+                if not rel_p:
+                    continue
+                full_p = (repo_root / rel_p).resolve()
+                if full_p.is_file():
+                    changed.add(full_p)
+            return True
+
+        # 1. Uncommitted / staged / untracked working-tree modifications
+        proc = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if proc.returncode == 0:
+            for raw in proc.stdout.splitlines():
+                if len(raw) < 4:
+                    continue
+                rel = raw[3:].strip().strip('"')
+                if " -> " in rel:
+                    rel = rel.split(" -> ", 1)[1].strip('"')
+                full = (repo_root / rel).resolve()
+                if full.is_file():
+                    changed.add(full)
+
+        # 2. GitHub Actions pull_request base branch diff (when working tree is clean on checkout)
+        base_ref = os.environ.get("GITHUB_BASE_REF", "").strip()
+        if base_ref:
+            if not _collect_diff_paths(["diff", "--name-only", f"origin/{base_ref}...HEAD"]):
+                if not _collect_diff_paths(["diff", "--name-only", f"{base_ref}...HEAD"]):
+                    _collect_diff_paths(["diff", "--name-only", "HEAD^1", "HEAD^2"])
+
+        # 3. Local committed feature-branch fallback when working tree has 0 dirty files
+        if not changed:
+            if not _collect_diff_paths(["diff", "--name-only", "origin/main...HEAD"]):
+                _collect_diff_paths(["diff", "--name-only", "HEAD~1..HEAD"])
+
         return changed
     except Exception:
         return None
@@ -855,7 +940,11 @@ def run_manifest_and_ast_prefilter(
                 result.skipped_clean_files.append(rel_str)
             continue
 
-        if name_lower.endswith((".js", ".jsx", ".ts", ".tsx")) and not name_lower.endswith(".min.js"):
+        if (
+            name_lower.endswith((".js", ".jsx", ".ts", ".tsx"))
+            and not name_lower.endswith((".min.js", ".bundle.js", ".chunk.js"))
+            and not re.search(r"-[a-z0-9]{6,}\.js$", name_lower)
+        ):
             js_findings = _inspect_js_ts_react_file(fpath)
             if js_findings:
                 result.deterministic_findings.extend(js_findings)

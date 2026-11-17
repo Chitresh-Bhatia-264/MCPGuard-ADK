@@ -206,3 +206,34 @@ def test_action_yml_blocks_shell_injection_and_tui_uses_accurate_labels() -> Non
     assert "WHAT LEAKED :" in rendered  # Used for MCPG-SEC-003 secret exposure
     assert "DETECTED    :" in rendered  # Used for non-leak rules like async McpToolset init
     assert "COST RISK   :" in rendered  # Used for >200K Pro loop cost cliff
+
+
+def test_git_diff_detects_committed_pr_branch_when_worktree_clean(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+    from mcpguard_adk.nodes.prefilter import run_manifest_and_ast_prefilter
+
+    repo = tmp_path / "pr_sim_repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-b", "main"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "ci@example.com"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "CI Bot"], check=True)
+
+    # Base commit on `main`
+    (repo / "README.md").write_text("# Clean Repo\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-m", "initial"], check=True, capture_output=True)
+
+    # PR branch commit with clean working tree (`git status --porcelain` is empty, simulating GitHub Actions checkout)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feat/mcp"], check=True, capture_output=True)
+    (repo / "mcp.json").write_text(
+        '{"mcpServers":{"fs":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/"]}}}',
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(repo), "add", "mcp.json"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-m", "add mcp"], check=True, capture_output=True)
+
+    monkeypatch.setenv("GITHUB_BASE_REF", "main")
+    pf = run_manifest_and_ast_prefilter(repo, git_diff_only=True)
+    assert any(Path(p).name == "mcp.json" for p in pf.scanned_files)
+    assert len(pf.deterministic_findings) >= 2
+

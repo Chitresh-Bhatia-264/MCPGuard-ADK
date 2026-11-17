@@ -18,8 +18,46 @@ from pathlib import Path
 from typing import Any
 
 from mcpguard_adk.nodes.hitl_patch_emitter import _remediate_file_content
+from mcpguard_adk.nodes.prefilter import NAMED_SECRET_PATTERNS
 from mcpguard_adk.schemas import AuditFinding, AuditReport, FindingCategory
 from mcpguard_adk.tui import _redact_secrets_in_line
+
+
+def _surgical_single_line_fix(orig_line: str, finding: AuditFinding) -> str | None:
+    """Produce an indentation-preserving single-line GitHub `suggestion` replacement."""
+    if finding.rule_id == "MCPG-SEC-003":
+        # Extract env/JSON key name if present, else fallback to `SECRET_ENV_VAR`
+        key_name = "SECRET_ENV_VAR"
+        if ":" in orig_line:
+            lhs = orig_line.split(":", 1)[0].strip().strip('"').strip("'")
+            if lhs.isidentifier():
+                key_name = lhs
+        elif "=" in orig_line:
+            lhs = orig_line.split("=", 1)[0].strip()
+            if lhs.isidentifier():
+                key_name = lhs
+        updated = orig_line
+        for _, pat in NAMED_SECRET_PATTERNS:
+            updated = pat.sub(f"${{{key_name}}}", updated)
+        if updated != orig_line:
+            return updated
+
+    if finding.rule_id == "MCPG-SEC-001":
+        for bad in ('"/"', '"~"', '".."', '"../"', '"/etc"', '"/root"'):
+            if bad in orig_line:
+                return orig_line.replace(bad, '"./workspace"', 1)
+
+    if finding.rule_id == "MCPG-SEC-002":
+        if '"-y"' in orig_line:
+            return None
+        if "@" in orig_line and orig_line.count("@") == 1 and '"' in orig_line:
+            # Scoped package `@scope/pkg` without version suffix
+            return orig_line.replace('",', '@2026.11.1",', 1) if '",' in orig_line else orig_line
+
+    if finding.rule_id == "MCPG-COST-001" and "gemini-3.1-pro-preview" in orig_line:
+        return orig_line.replace("gemini-3.1-pro-preview", "gemini-3.8-flash", 1)
+
+    return None
 
 
 def _compute_inline_suggestion_for_finding(
@@ -33,14 +71,23 @@ def _compute_inline_suggestion_for_finding(
     except ValueError:
         rel_posix = fpath.name
 
-    remediated = _remediate_file_content(fpath)
     suggestion_line: str | None = None
+    remediated = _remediate_file_content(fpath)
+    idx = finding.line_number - 1
     if remediated is not None:
         orig_lines, new_lines = remediated
-        idx = finding.line_number - 1
-        if 0 <= idx < len(orig_lines) and len(orig_lines) == len(new_lines):
-            if orig_lines[idx] != new_lines[idx]:
+        if 0 <= idx < len(orig_lines):
+            if len(orig_lines) == len(new_lines) and orig_lines[idx] != new_lines[idx]:
                 suggestion_line = new_lines[idx]
+            else:
+                suggestion_line = _surgical_single_line_fix(orig_lines[idx], finding)
+    elif fpath.is_file():
+        try:
+            raw_lines = fpath.read_text(encoding="utf-8").splitlines()
+            if 0 <= idx < len(raw_lines):
+                suggestion_line = _surgical_single_line_fix(raw_lines[idx], finding)
+        except Exception:
+            pass
 
     masked_what = _redact_secrets_in_line(finding.leaked_evidence or finding.title)
     label = "Leaked Credential" if finding.category == FindingCategory.MCP_SECRET_EXPOSURE else "Detected Issue"

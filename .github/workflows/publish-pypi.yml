@@ -32,8 +32,7 @@ jobs:
   publish-to-pypi:
     name: Publish to PyPI via Trusted Publisher (OIDC)
     needs: [build-dist]
-    if: github.event_name == 'release'
-    continue-on-error: true
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment:
       name: pypi

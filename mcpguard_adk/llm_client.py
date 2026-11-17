@@ -34,27 +34,27 @@ def estimate_payload_tokens(text: str) -> int:
 
 
 def _load_dotenv_if_present() -> None:
-    env_path = Path.cwd() / ".env"
-    if not env_path.is_file():
-        return
-    try:
-        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, val = line.split("=", 1)
-            key = key.strip()
-            val = val.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = val
-    except Exception:
-        pass
+    for env_path in (Path.cwd() / ".env", Path.home() / ".env"):
+        if not env_path.is_file():
+            continue
+        try:
+            for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+        except Exception:
+            pass
 
 
 def get_active_gemini_api_key() -> str | None:
-    """Return a valid `GEMINI_API_KEY` if configured, or None if missing/placeholder."""
+    """Return a valid `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) if configured, or None if missing."""
     _load_dotenv_if_present()
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
     if not key or key in {"your-google-ai-studio-api-key", "your-free-ai-studio-key", "changeme"}:
         return None
     return key
@@ -81,8 +81,12 @@ def call_gemini_generate_content(
             "estimated_dry_run_input_tokens": estimated_in,
         }
 
-    # Try preferred model first, falling back to GA `gemini-2.5-flash` if preview alias is unavailable on key
+    # Try preferred model first, falling back to GA Gemini 2.5 tier equivalent if preview alias is unavailable
     candidate_models = [preferred_model]
+    if "lite" in preferred_model and "gemini-2.5-flash-lite" not in candidate_models:
+        candidate_models.append("gemini-2.5-flash-lite")
+    if "pro" in preferred_model and "gemini-2.5-pro" not in candidate_models:
+        candidate_models.append("gemini-2.5-pro")
     if "gemini-2.5-flash" not in candidate_models:
         candidate_models.append("gemini-2.5-flash")
 
