@@ -17,16 +17,16 @@
   ██║   ██║  ██║╚██╔╝██║██║     ██╔═══╝ ██║   ██║██║   ██║██╔══██║██╔══██╗██║  ██║
   ╚██████╔╝  ██║ ╚═╝ ██║╚██████╗██║     ╚██████╔╝╚██████╔╝██║  ██║██║  ██║██████╔╝
    ✦ ADK 2    ╚═╝     ╚═╝ ╚═════╝╚═╝      ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ 
-   Google ADK 2.0 Hybrid Graph • A2A v1.0 Ed25519/JCS • Gemini FinOps • Cloud Trace OTLP v0.3.0
+   Google ADK 2.0 Hybrid Graph • A2A v1.0 Ed25519/JCS • Gemini FinOps • Cloud Trace OTLP v0.3.1
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-╭─ ✦ 0-TOK AST ──────╮  ╭─ ◆ RISK ALERTS ────╮  ╭─ ● FINOPS SAVED ───╮  ╭─ ▸ A2A v1.0 JWS ───╮
-│ 1053/1069 Clean    │  │ 23 Findings        │  │ -95.4% Spend       │  │ Ed25519 OK         │
-│ $0.00 (0 Tokens)   │  │ 11 Crit • 11 High  │  │ $52.15 vs $1,144   │  │ ID 853af5cf368     │
+╭─ ✦ 0-TOK AST ──────╮  ╭─ ◆ RISK ALERTS ────╮  ╭─ ● SCAN SPEND ─────╮  ╭─ ▸ A2A v1.0 JWS ───╮
+│ 0/4 Clean          │  │ 8 Findings         │  │ $0.0000 Actual     │  │ Ed25519 OK         │
+│ $0.00 (0 Tokens)   │  │ 3 Crit • 4 High    │  │ 0 Billed Tokens    │  │ ID 853af5cf368     │
 ╰────────────────────╯  ╰────────────────────╯  ╰────────────────────╯  ╰────────────────────╯
 
 ╭── ◆ Security & >200K Cost-Cliff Alerts (Auto-Redacted Pinpoint View) ───── ACTION REQUIRED ──╮
-│  4.  CRITICAL  MCPG-SEC-003 ▸ vulnerable_mcp_config.json:11:41                               │
+│  3.  CRITICAL  MCPG-SEC-003 ▸ vulnerable_mcp_config.json:11:41                               │
 │     WHAT LEAKED : GitHub Personal Access Token: GITHUB_PERSONAL_ACCESS_TOKEN = ghp_1234••••  │
 │     WHERE (FILE): examples/vulnerable_mcp_config.json (Line 11, Col 41)                      │
 │     ┌── Source Pinpoint ──────────────────────────────────────────────────────────────────   │
@@ -38,12 +38,12 @@
 │     ✔ FIX: Replace literal value with `${GITHUB_PERSONAL_ACCESS_TOKEN}` and load from `.env` │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 
-╭── ✦ Google Cloud & ADK 2.0 Verification Scorecard (5/5) ───────────────────  100% VERIFIED  ─╮
-│ ✔ [VERIFIED] ADK 2.0 Hybrid Graph     │ Skipped 1053 clean files locally at $0.00 (0 tokens) │
-│ ✔ [VERIFIED] Zero Context Bloat       │ Sync McpToolset isolated in AgentTool (read-only)    │
-│ ✔ [VERIFIED] A2A v1.0 Ed25519 + JCS   │ RFC 8037 EdDSA verified over RFC 8785 JCS AgentCard  │
-│ ✔ [VERIFIED] Cloud Trace OTLP SDK     │ EVENT_ONLY active; W3C resourceSpans exported        │
-│ ✔ [VERIFIED] MCP Stdio & SARIF Gate   │ JSON-RPC 2.0 serve-mcp + SARIF v2.1.0 + .test.json   │
+╭── ✦ Google Cloud & ADK 2.0 Runtime Conformance Scorecard (5/5) ──────────────  5/5 PASSED  ──╮
+│ ✔ [VERIFIED] ADK 2.0 Hybrid Graph     │ Stage 1 0-token AST ran (0/4 clean skipped); 6 spans │
+│ ✔ [VERIFIED] Zero Context Bloat       │ Sync McpToolset ['list_directory', 'read_file'] RO   │
+│ ✔ [VERIFIED] A2A v1.0 Ed25519 + JCS   │ EdDSA valid + negative tamper test rejected          │
+│ ✔ [VERIFIED] Cloud Trace OTLP SDK     │ EVENT_ONLY active; 6 W3C spans exported              │
+│ ✔ [VERIFIED] MCP Stdio & SARIF Gate   │ Live JSON-RPC tools/list (3 tools) + SARIF 2.1.0     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -155,7 +155,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: Chitresh-Bhatia-264/MCPGuard-ADK@main
+      - uses: Chitresh-Bhatia-264/MCPGuard-ADK@v0.3.1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on: "critical"
@@ -181,21 +181,21 @@ python -m mcpguard_adk.cli agent-card --jwks
 # Interactive slash-command shell (/scan, /react, /voice, /patch, /a2a, /quit)
 python -m mcpguard_adk.cli shell
 
-# Full scan + approve Stage 5 HITL gate + emit SARIF v2.1.0 + export W3C OTLP traces
-python -m mcpguard_adk.cli scan ./examples --live --approve-patches \
+# Full scan + simulated 1,000-PR FinOps model + approve HITL gate + SARIF v2.1.0 + OTLP traces
+python -m mcpguard_adk.cli scan ./examples --live --finops-sim --approve-patches \
   --emit-sarif reports/mcpguard.sarif.json \
   --export-otel reports/otel_traces.json
 
 # Pull-Request CI Gate (scan only git-modified files; exit code 2 on CRITICAL/HIGH)
 python -m mcpguard_adk.cli scan . --git-diff --fail-on high
 
-# Generate or post 1-Click GitHub PR Inline Review Suggestions (```suggestion blocks)
+# Generate or post 1-Click GitHub PR Inline Review Suggestions (fork-PR HTTP 403 safe)
 python -m mcpguard_adk.cli pr-review . --git-diff --fail-on critical
 
 # Launch interactive browser visualizer (ADK 2.0 Graph + >200K Cliff Sliders)
 python -m mcpguard_adk.cli ui ./examples
 
-# Run the 17-test verification suite (AST, FinOps, Ed25519 tamper detection, MCP stdio, OTel)
+# Run the 23-test verification suite (AST, FinOps, fork-PR 403 safety, Ed25519, MCP stdio, OTel)
 python -m pytest tests -v
 ```
 
@@ -220,7 +220,7 @@ MCPGuard-ADK/
 │   └── telemetry/                # Official OpenTelemetry SDK W3C tracer & OTLP/JSON exporter (EVENT_ONLY)
 ├── examples/                     # Deliberately vulnerable MCP config & uncompacted Pro loop for testing
 ├── evals/                        # ADK .test.json and multi-turn .evalset.json conformance suites
-├── tests/                        # 17 automated pytest suites
+├── tests/                        # 23 automated pytest suites
 ├── Dockerfile                    # Production container for Google Cloud Run
 └── cloudbuild.yaml               # Automated Google Cloud Build CI/CD pipeline
 ```

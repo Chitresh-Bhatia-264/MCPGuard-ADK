@@ -1,13 +1,12 @@
 """GitHub Pull Request Bot & Inline Code-Suggestion Reviewer for MCPGuard-ADK.
 
 Turns Stage 1 findings and Stage 5 `difflib` remediations into:
-1. A rich Markdown PR Summary Comment (with auto-redacted leak pinpoints, FinOps benchmark,
-   and collapsible unified Git patch).
-2. Exact GitHub Pull Request Review Inline Comments using GitHub's `suggestion` fence
-   (````suggestion ... ````) so developers can click **"Commit suggestion"** in 1 click on PRs.
-
-Works automatically inside GitHub Actions (`GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_EVENT_PATH`)
-or locally in `--dry-run` mode for testing and inspection.
+1. A Markdown PR Summary Comment (reporting actual scan telemetry, auto-redacted findings,
+   and collapsible unified Git patch; includes simulated FinOps benchmark only when
+   cost-cliff findings exist or `include_finops_sim=True`).
+2. Exact GitHub Pull Request Review Inline Comments using GitHub's `suggestion` fence.
+3. Safe error handling for fork PRs with read-only `GITHUB_TOKEN` (catches HTTP 403/401 on
+   both endpoints without crashing so CI `--fail-on` exit codes always execute).
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from mcpguard_adk.nodes.hitl_patch_emitter import _remediate_file_content
-from mcpguard_adk.schemas import AuditFinding, AuditReport
+from mcpguard_adk.schemas import AuditFinding, AuditReport, FindingCategory
 from mcpguard_adk.tui import _redact_secrets_in_line
 
 
@@ -44,9 +43,10 @@ def _compute_inline_suggestion_for_finding(
                 suggestion_line = new_lines[idx]
 
     masked_what = _redact_secrets_in_line(finding.leaked_evidence or finding.title)
+    label = "Leaked Credential" if finding.category == FindingCategory.MCP_SECRET_EXPOSURE else "Detected Issue"
     body_lines = [
         f"### 🛡️ MCPGuard-ADK: `{finding.rule_id}` ({finding.severity.value})",
-        f"**Detected**: `{masked_what}`",
+        f"**{label}**: `{masked_what}`",
         f"**Why it matters**: {finding.description}",
         f"**Remediation**: {finding.remediation}",
     ]
@@ -72,10 +72,21 @@ def _compute_inline_suggestion_for_finding(
 def build_github_pr_review_payload(
     report: AuditReport,
     repo_root: str | Path = ".",
+    include_finops_sim: bool = False,
 ) -> dict[str, Any]:
     """Construct a complete GitHub Pull Request Review API payload (`event`, `body`, `comments`)."""
     root_path = Path(repo_root).resolve()
     cs = report.cost_summary
+    billed_in = sum(int(sp.get("gen_ai.usage.input_tokens", 0)) for sp in report.otel_Waterfall_spans)
+    billed_out = sum(int(sp.get("gen_ai.usage.output_tokens", 0)) for sp in report.otel_Waterfall_spans)
+    has_cost_finding = any(
+        f.category
+        in {
+            FindingCategory.COST_CLIFF_200K_UNCOMPACTED,
+            FindingCategory.MCP_CONTEXT_BLOAT_ROOT_TOOLSET,
+        }
+        for f in report.findings
+    )
 
     header_badge = (
         "✅ **PASSED — 0 Security or >200K Cost-Cliff Issues**"
@@ -87,11 +98,18 @@ def build_github_pr_review_payload(
         "## 🛡️ MCPGuard-ADK Pull Request Security & FinOps Audit",
         header_badge,
         "",
-        f"- **Stage 1 Deterministic AST Pre-Filter**: `{len(report.prefilter.skipped_clean_files)}/{len(report.prefilter.scanned_files)}` clean files skipped at **$0.00 (0 LLM tokens)**",
-        f"- **1,000-PR FinOps Benchmark**: **`${cs.mcpguard_tiered_2026_promo_usd:.2f}`** Hybrid vs `${cs.naive_pro_over_200k_usd:,.2f}` Naive >200K Pro (**`-{cs.savings_vs_naive_over_200k_pct}%` saved**)",
+        f"- **Stage 1 Deterministic AST Pre-Filter**: `{len(report.prefilter.skipped_clean_files)}/{len(report.prefilter.scanned_files)}` clean files skipped",
+        f"- **Measured Scan Token Usage**: `{billed_in + billed_out}` billed LLM tokens (`in={billed_in}`, `out={billed_out}`)",
         f"- **W3C Cloud Trace ID**: `{report.otel_trace_id}`",
-        "",
     ]
+
+    if include_finops_sim or has_cost_finding:
+        md.append(
+            f"- **Simulated 1,000-PR Rate-Card Model**: `${cs.mcpguard_tiered_2026_promo_usd:.2f}` Tiered Hybrid vs "
+            f"`${cs.naive_pro_over_200k_usd:,.2f}` Naive >200K Pro (`-{cs.savings_vs_naive_over_200k_pct}%` simulated estimate)"
+        )
+
+    md.append("")
 
     inline_comments: list[dict[str, Any]] = []
     seen_locations: set[tuple[str, int]] = set()
@@ -99,7 +117,7 @@ def build_github_pr_review_payload(
     if report.findings:
         md.extend(
             [
-                "| Severity | Rule | Location | What Leaked / Risk |",
+                "| Severity | Rule | Location | Finding Detail |",
                 "| :--- | :--- | :--- | :--- |",
             ]
         )
@@ -170,13 +188,17 @@ def post_github_pr_review(
     github_token: str,
     api_base: str = "https://api.github.com",
 ) -> dict[str, Any]:
-    """Post inline PR review suggestions to GitHub REST API (falls back to PR issue comment if line outside diff)."""
+    """Post inline PR review suggestions to GitHub REST API with graceful read-only fork fallback.
+
+    Never raises uncaught HTTP/network exceptions (e.g. HTTP 403 on read-only fork PR tokens)
+    so downstream `--fail-on` severity exit-code gates always execute cleanly.
+    """
     headers = {
         "Authorization": f"Bearer {github_token}",
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "MCPGuard-ADK-PR-Bot/0.3.0",
+        "User-Agent": "MCPGuard-ADK-PR-Bot/0.3.1",
     }
     reviews_url = f"{api_base.rstrip('/')}/repos/{repo}/pulls/{pr_number}/reviews"
     req = urllib.request.Request(
@@ -188,8 +210,8 @@ def post_github_pr_review(
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return {"posted": True, "mode": "pull_request_review", "status": resp.status}
-    except Exception:
-        # Fallback: if an inline line was not part of the PR diff hunk, post the full summary + patch comment
+    except Exception as primary_err:
+        # Fallback 1: Try posting summary issue comment (if inline diff hunk didn't match)
         comments_url = f"{api_base.rstrip('/')}/repos/{repo}/issues/{pr_number}/comments"
         fallback_req = urllib.request.Request(
             comments_url,
@@ -197,5 +219,14 @@ def post_github_pr_review(
             headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(fallback_req, timeout=15) as resp2:
-            return {"posted": True, "mode": "issue_summary_comment", "status": resp2.status}
+        try:
+            with urllib.request.urlopen(fallback_req, timeout=15) as resp2:
+                return {"posted": True, "mode": "issue_summary_comment", "status": resp2.status}
+        except Exception as fallback_err:
+            # Fallback 2: Fork PR read-only token (HTTP 403) or offline CI — return structured failure without crashing
+            return {
+                "posted": False,
+                "mode": "stdout_job_log_fallback",
+                "primary_error": str(primary_err),
+                "fallback_error": str(fallback_err),
+            }

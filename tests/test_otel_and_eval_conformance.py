@@ -117,3 +117,92 @@ def test_github_pr_review_inline_suggestions_and_uvx_entrypoints(tmp_path: Path)
     dry_out = tmp_path / "pr_review.json"
     rc = main(["pr-review", str(examples_dir), "--dry-run-output", str(dry_out)])
     assert rc == 0 and dry_out.is_file()
+
+
+def test_fork_pr_http_403_does_not_crash_and_enforces_fail_on(
+    monkeypatch: object, capsys: object
+) -> None:
+    import email.message
+    import urllib.error
+    import urllib.request
+    from mcpguard_adk.cli import main
+
+    def _raise_403(*args: object, **kwargs: object) -> object:
+        raise urllib.error.HTTPError(
+            url="https://api.github.com/repos/org/repo/issues/1/comments",
+            code=403,
+            msg="Resource not accessible by integration",
+            hdrs=email.message.Message(),
+            fp=None,
+        )
+
+    mp = monkeypatch  # type: ignore[assignment]
+    mp.setattr(urllib.request, "urlopen", _raise_403)
+    mp.setenv("GITHUB_TOKEN", "ghs_readonly_fork_token")
+
+    examples_dir = str((Path(__file__).resolve().parent.parent / "examples").resolve())
+    rc = main(
+        ["pr-review", examples_dir, "--repo", "org/repo", "--pr", "1", "--fail-on", "critical"]
+    )
+    captured = capsys.readouterr()  # type: ignore[attr-defined]
+    # Must NOT crash with exit code 1; must print audit report to job log and return exit code 2
+    assert rc == 2
+    assert "MCPGuard-ADK Pull Request Security & FinOps Audit" in captured.out
+    assert "Could not post GitHub PR comment" in captured.err
+
+
+def test_clean_scan_omits_simulated_finops_banner_until_requested() -> None:
+    from mcpguard_adk.agent import MCPGuardGraphWorkflow
+    from mcpguard_adk.github_pr_bot import build_github_pr_review_payload
+    from mcpguard_adk.tui import render_rich_audit_report
+
+    clean_dir = Path(__file__).resolve().parent.parent / "examples" / "clean_manifest"
+    clean_report = MCPGuardGraphWorkflow().run(clean_dir)
+
+    tui_default = render_rich_audit_report(clean_report, show_finops_sim=False)
+    assert "$0.0000 Actual" in tui_default
+    assert "Simulated 1,000-PR Gemini Rate-Card Model" not in tui_default
+
+    tui_with_flag = render_rich_audit_report(clean_report, show_finops_sim=True)
+    assert "Simulated 1,000-PR Gemini Rate-Card Model" in tui_with_flag
+
+    pr_clean = build_github_pr_review_payload(clean_report, repo_root=clean_dir, include_finops_sim=False)
+    assert "Simulated 1,000-PR Rate-Card Model" not in pr_clean["body"]
+
+
+def test_scorecard_dynamically_detects_broken_invariants() -> None:
+    from mcpguard_adk.agent import MCPGuardGraphWorkflow
+    from mcpguard_adk.tui import evaluate_runtime_scorecard
+
+    clean_dir = Path(__file__).resolve().parent.parent / "examples" / "clean_manifest"
+    report = MCPGuardGraphWorkflow().run(clean_dir)
+
+    baseline = evaluate_runtime_scorecard(report)
+    assert all(ok for ok, _, _ in baseline)
+
+    # Corrupt Stage 1 token invariant and W3C traceId -> checks #1 and #4 must flip to False
+    corrupted = report.model_copy(deep=True)
+    corrupted.prefilter.llm_tokens_consumed = 99
+    corrupted.otel_trace_id = "invalid-short-trace"
+    degraded = evaluate_runtime_scorecard(corrupted)
+    assert degraded[0][0] is False  # ADK 2.0 Hybrid Graph check failed
+    assert degraded[3][0] is False  # Cloud Trace OTLP SDK check failed
+
+
+def test_action_yml_blocks_shell_injection_and_tui_uses_accurate_labels() -> None:
+    from mcpguard_adk.agent import MCPGuardGraphWorkflow
+    from mcpguard_adk.tui import render_rich_audit_report
+
+    root_dir = Path(__file__).resolve().parent.parent
+    action_text = (root_dir / "action.yml").read_text(encoding="utf-8")
+    # Ensure `${{ inputs.* }}` only appears in `env:` mappings, never inside `run:` shell commands
+    for block in action_text.split("run:")[1:]:
+        run_section = block.split("\n    - name:")[0]
+        assert "${{ inputs." not in run_section
+        assert "${{ github.action_path }}" not in run_section
+
+    report = MCPGuardGraphWorkflow().run(root_dir / "examples")
+    rendered = render_rich_audit_report(report)
+    assert "WHAT LEAKED :" in rendered  # Used for MCPG-SEC-003 secret exposure
+    assert "DETECTED    :" in rendered  # Used for non-leak rules like async McpToolset init
+    assert "COST RISK   :" in rendered  # Used for >200K Pro loop cost cliff

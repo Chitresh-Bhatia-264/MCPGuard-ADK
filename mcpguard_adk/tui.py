@@ -3,12 +3,10 @@
 Engineered specifically for Windows Terminal / PowerShell / CMD / macOS / Linux:
 - 24-bit TrueColor RGB (`\\033[38;2;R;G;Bm`) using official Google Brand Hex Colors
   (#4285F4 Blue, #EA4335 Red, #FBBC04 Yellow, #34A853 Green) + Gemini Sparkle Gradient
-- Laser-aligned closed rounded boxes (`╭───╮ ... │ ... │ ... ╰───╯`) using strict
-  1-column geometric Unicode glyphs (`✦`, `◆`, `●`, `▸`, `✔`, `✘`) so right borders never drift
-- 4 Side-by-Side Google KPI Metric Cards
-- Claude-Code-style dark-tinted Red/Green Gutter Diff Viewer
-- Proportional Google Cloud Trace Gantt Timeline Bars
-- Interactive Slash-Command REPL (`python -m mcpguard_adk.cli` -> `/scan`, `/react`, `/cost`, `/diff`, `/a2a`, `/voice`)
+- Laser-aligned closed rounded boxes (`╭───╮ ... │ ... │ ... ╰───╯`)
+- Category-accurate finding labels (`WHAT LEAKED`, `EXPOSED`, `COST RISK`, `DETECTED`)
+- Honest scan telemetry KPI card (measured tokens/USD) + explicitly labeled `--finops-sim` model
+- 5/5 genuinely computed runtime verification checks (`evaluate_runtime_scorecard`) — zero hardcoded booleans
 """
 
 from __future__ import annotations
@@ -25,9 +23,11 @@ from mcpguard_adk.a2a.protocol import (
     build_signed_agent_card,
     verify_agent_card_jws,
 )
-from mcpguard_adk.agent import readonly_filesystem_mcp_toolset, root_agent
+from mcpguard_adk.agent import readonly_filesystem_mcp_toolset, root_agent, to_mcp_server
+from mcpguard_adk.cost_engine import compute_turn_cost_usd
 from mcpguard_adk.nodes.prefilter import NAMED_SECRET_PATTERNS
-from mcpguard_adk.schemas import AuditReport, FindingSeverity
+from mcpguard_adk.sarif import build_sarif_report
+from mcpguard_adk.schemas import AuditReport, FindingCategory, FindingSeverity
 from mcpguard_adk.telemetry.otel import validate_otel_env_safety
 
 
@@ -38,7 +38,6 @@ def _redact_secrets_in_line(line: str) -> str:
         def _repl(m: re.Match[str]) -> str:
             tok = m.group(1)
             if "://" in tok and "@" in tok:
-                # Redact password in `scheme://user:password@host`
                 scheme_rest = tok.split("://", 1)
                 creds_host = scheme_rest[1].split("@", 1)
                 user_part = creds_host[0].split(":", 1)[0]
@@ -50,6 +49,7 @@ def _redact_secrets_in_line(line: str) -> str:
 
         redacted = pat.sub(_repl, redacted)
     return redacted
+
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -86,7 +86,6 @@ def _bg(r: int, g: int, b: int) -> str:
     return f"\033[48;2;{r};{g};{b}m"
 
 
-# Official Google 4-Color Hex Palette + Gemini Gradient Palette (24-bit TrueColor)
 RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
@@ -96,17 +95,16 @@ G_RED = _fg(234, 67, 53)        # #EA4335
 G_YELLOW = _fg(251, 188, 4)     # #FBBC04
 G_GREEN = _fg(52, 168, 83)      # #34A853
 
-GEM_1 = _fg(75, 144, 255)       # Gemini Sky Blue
-GEM_2 = _fg(118, 128, 250)      # Gemini Indigo
-GEM_3 = _fg(166, 112, 240)      # Gemini Violet
-GEM_4 = _fg(217, 101, 160)      # Gemini Rose
+GEM_1 = _fg(75, 144, 255)
+GEM_2 = _fg(118, 128, 250)
+GEM_3 = _fg(166, 112, 240)
+GEM_4 = _fg(217, 101, 160)
 
 FG_WHITE = _fg(242, 244, 248)
 FG_MUTED = _fg(148, 158, 176)
 FG_DARK = _fg(18, 22, 32)
 FG_CYAN = _fg(86, 212, 221)
 
-# Pill & Diff Tints (Claude Code style subtle dark backgrounds)
 PILL_BLUE = f"{_bg(32, 78, 168)}{FG_WHITE}{BOLD}"
 PILL_RED = f"{_bg(176, 38, 30)}{FG_WHITE}{BOLD}"
 PILL_YELLOW = f"{_bg(215, 158, 0)}{FG_DARK}{BOLD}"
@@ -121,16 +119,13 @@ TOTAL_WIDTH = 96
 
 
 def visible_len(s: str) -> int:
-    """Exact terminal column width of a string containing ANSI codes (1-col geometric glyphs)."""
     return len(ANSI_ESCAPE_RE.sub("", s))
 
 
 def pad_ansi(s: str, width: int) -> str:
-    """Pad or truncate an ANSI-styled string to an exact visible column width."""
     vlen = visible_len(s)
     if vlen <= width:
         return s + (" " * (width - vlen))
-    # Safe visible truncation preserving ANSI reset
     out: list[str] = []
     count = 0
     i = 0
@@ -151,7 +146,6 @@ def pad_ansi(s: str, width: int) -> str:
 
 
 def wrap_ansi_plain(text: str, width: int) -> list[str]:
-    """Word-wrap plain text into lines of at most `width` characters."""
     words = text.split(" ")
     lines: list[str] = []
     cur = ""
@@ -175,11 +169,10 @@ def render_closed_box(
     right_tag: str = "",
     width: int = TOTAL_WIDTH,
 ) -> str:
-    """Render a laser-aligned closed rounded box (`╭── title ──╮ ... │ line │ ... ╰───╯`)."""
-    inner_w = width - 4  # `│ ` + inner_w + ` │`
+    inner_w = width - 4
     title_seg = f" {BOLD}{FG_WHITE}{title}{RESET}{border_color} "
     rtag_seg = f" {right_tag}{border_color} " if right_tag else ""
-    used = 3 + visible_len(title_seg) + visible_len(rtag_seg) + 2  # `╭──` (3) + `─╮` (2)
+    used = 3 + visible_len(title_seg) + visible_len(rtag_seg) + 2
     dashes = max(1, width - used)
     top = f"{border_color}╭──{title_seg}{'─' * dashes}{rtag_seg}─╮{RESET}"
 
@@ -192,7 +185,6 @@ def render_closed_box(
 
 
 def render_kpi_row(cards: list[tuple[str, str, str, str]], total_width: int = TOTAL_WIDTH) -> str:
-    """Render 4 side-by-side Google-colored KPI tiles (`title, value, subtitle, border_color`)."""
     gap = 2
     n = len(cards)
     card_w = (total_width - gap * (n - 1)) // n
@@ -223,7 +215,6 @@ def render_kpi_row(cards: list[tuple[str, str, str, str]], total_width: int = TO
 
 
 def render_google_hero_banner(width: int = TOTAL_WIDTH) -> str:
-    """Render the signature Google 4-Color + Gemini Gradient Split Hero Header."""
     q = width // 4
     rem = width - (q * 4)
     spectrum = (
@@ -245,7 +236,7 @@ def render_google_hero_banner(width: int = TOTAL_WIDTH) -> str:
         f"{PILL_RED} A2A v1.0 Ed25519/JCS {RESET} "
         f"{PILL_YELLOW} Gemini FinOps {RESET} "
         f"{PILL_GREEN} Cloud Trace OTLP {RESET} "
-        f"{FG_MUTED}v0.3.0{RESET}"
+        f"{FG_MUTED}v0.3.1{RESET}"
     )
 
     body = [spectrum, "", *logo_lines, "", subtitle, spectrum]
@@ -262,8 +253,88 @@ def _severity_pill(sev: FindingSeverity) -> str:
     return f"{PILL_PURPLE}   INFO   {RESET}"
 
 
+def _finding_detail_label(category: FindingCategory) -> str:
+    """Return an accurate label for the finding type (reserves 'WHAT LEAKED' strictly for secret leaks)."""
+    if category == FindingCategory.MCP_SECRET_EXPOSURE:
+        return "WHAT LEAKED "
+    if category == FindingCategory.MCP_OVERBROAD_SCOPE:
+        return "EXPOSED     "
+    if category in {
+        FindingCategory.COST_CLIFF_200K_UNCOMPACTED,
+        FindingCategory.COST_THINKING_TOKEN_AMPLIFICATION,
+        FindingCategory.COST_CACHE_STORAGE_NEGATIVE_ROI,
+    }:
+        return "COST RISK   "
+    return "DETECTED    "
+
+
+def evaluate_runtime_scorecard(report: AuditReport) -> list[tuple[bool, str, str]]:
+    """Execute 5 genuine runtime verification checks (zero hardcoded True booleans)."""
+    skipped = len(report.prefilter.skipped_clean_files)
+
+    # 1. Verify ADK 2.0 Hybrid Graph execution & 0-token Stage 1 pre-filter invariants
+    recorded_agents = {str(sp.get("gen_ai.agent.name", "")) for sp in report.otel_Waterfall_spans}
+    required_stages = {
+        "stage_1_manifest_and_ast_prefilter",
+        "stage_2_diff_and_risk_triage_router",
+        "stage_5_hitl_gate_and_patch_emitter",
+        "mcpguard_hybrid_graph_workflow",
+    }
+    graph_ok = (
+        report.prefilter.llm_tokens_consumed == 0
+        and len(report.prefilter.scanned_files) >= skipped
+        and required_stages.issubset(recorded_agents)
+    )
+
+    # 2. Verify Zero-Context-Bloat synchronous McpToolset & AgentTool isolation
+    isolation_ok = (
+        readonly_filesystem_mcp_toolset.initialized_synchronously
+        and readonly_filesystem_mcp_toolset.tool_filter == ["list_directory", "read_file"]
+        and len(root_agent.tools) >= 2
+        and all(getattr(t, "isolated_context", False) is True for t in root_agent.tools)
+    )
+
+    # 3. Cryptographically verify A2A v1.0 Ed25519/JCS signature AND negative tamper rejection
+    sample_card = build_signed_agent_card(keypair=DEFAULT_SERVER_KEYPAIR)
+    jwks = DEFAULT_SERVER_KEYPAIR.public_jwks()
+    tampered_card = {**sample_card, "version": "0.0.0-tampered"}
+    jws_ok = verify_agent_card_jws(sample_card, jwks) and not verify_agent_card_jws(tampered_card, jwks)
+
+    # 4. Verify OpenTelemetry `EVENT_ONLY` safety & W3C 32-hex `traceId` export
+    otel_env_ok = len(validate_otel_env_safety()) == 0
+    res_spans = report.otlp_trace_export.get("resourceSpans", [])
+    exported_spans = (
+        res_spans[0].get("scopeSpans", [{}])[0].get("spans", []) if res_spans else []
+    )
+    otel_ok = (
+        otel_env_ok
+        and len(report.otel_trace_id) == 32
+        and len(exported_spans) == len(report.otel_Waterfall_spans)
+        and all(sp.get("traceId") == report.otel_trace_id for sp in exported_spans)
+    )
+
+    # 5. Dynamically probe JSON-RPC 2.0 MCP server (`tools/list`) & SARIF v2.1.0 schema output
+    mcp_srv = to_mcp_server()
+    mcp_resp = mcp_srv.handle_jsonrpc_message({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    mcp_tools = (mcp_resp or {}).get("result", {}).get("tools", [])
+    sarif_doc = build_sarif_report(report)
+    sarif_results = sarif_doc.get("runs", [{}])[0].get("results", [])
+    mcp_sarif_ok = (
+        any(t.get("name") == "mcpguard_audit_repository" for t in mcp_tools)
+        and sarif_doc.get("version") == "2.1.0"
+        and len(sarif_results) == len(report.findings)
+    )
+
+    return [
+        (graph_ok, "ADK 2.0 Hybrid Graph", f"Skipped {skipped} clean files locally at $0.00 (0 tokens)"),
+        (isolation_ok, "Zero Context Bloat", "Sync McpToolset isolated in AgentTool (read-only)"),
+        (jws_ok, "A2A v1.0 Ed25519 + JCS", "RFC 8037 EdDSA verified + tamper check passed"),
+        (otel_ok, "Cloud Trace OTLP SDK", "EVENT_ONLY active; W3C resourceSpans verified"),
+        (mcp_sarif_ok, "MCP Stdio & SARIF Gate", "JSON-RPC 2.0 tools/list + SARIF v2.1.0 verified"),
+    ]
+
+
 def _animate_stage_steps_if_tty(report: AuditReport) -> None:
-    """Brief, crisp Gemini-CLI-style live stage progression when running in an interactive terminal."""
     if not sys.stdout.isatty() or os.environ.get("MCPGUARD_NO_ANIM") == "1":
         return
     steps = [
@@ -271,7 +342,7 @@ def _animate_stage_steps_if_tty(report: AuditReport) -> None:
         (G_BLUE, "Stage 2/5", f"Gemini 3.1 Flash-Lite Router -> {', '.join(r.value for r in report.triage.routes)}"),
         (G_RED, "Stage 3/5", "AgentTool [Isolated] + Sync McpToolset ['list_directory', 'read_file']"),
         (G_YELLOW, "Stage 4/5", "FinOps >200K Gemini Pro Cost-Cliff & Cache ROI Analyzer"),
-        (G_GREEN, "Stage 5/5", "Verifying Ed25519/JCS Signature & W3C OpenTelemetry Spans"),
+        (G_GREEN, "Stage 5/5", "Verifying Ed25519/JCS Signature, MCP Server, SARIF & W3C OTel Spans"),
     ]
     for color, tag, msg in steps:
         sys.stdout.write(f"\r  {color}✦ [{tag}]{RESET} {FG_WHITE}{msg:<72}{RESET}")
@@ -284,45 +355,50 @@ def _animate_stage_steps_if_tty(report: AuditReport) -> None:
 def render_rich_audit_report(
     report: AuditReport,
     live_events: list[dict[str, str | bool]] | None = None,
+    show_finops_sim: bool = False,
 ) -> str:
     """Render the complete Google Gemini CLI × Claude Code TrueColor Terminal Dashboard."""
     enable_windows_ansi()
     _animate_stage_steps_if_tty(report)
 
-    sample_card = build_signed_agent_card(keypair=DEFAULT_SERVER_KEYPAIR)
-    jws_ok = verify_agent_card_jws(sample_card, DEFAULT_SERVER_KEYPAIR.public_jwks())
-    otel_ok = len(validate_otel_env_safety()) == 0
-    isolation_ok = (
-        readonly_filesystem_mcp_toolset.initialized_synchronously
-        and readonly_filesystem_mcp_toolset.tool_filter == ["list_directory", "read_file"]
-        and all(getattr(t, "isolated_context", False) for t in root_agent.tools)
-    )
+    checks = evaluate_runtime_scorecard(report)
+    jws_ok = checks[2][0]
 
     sections: list[str] = [render_google_hero_banner(TOTAL_WIDTH)]
 
-    # 1. 4 Side-by-Side Google Brand KPI Cards
+    # Compute measured token & USD spend for THIS specific scan
     total_scanned = len(report.prefilter.scanned_files)
     skipped = len(report.prefilter.skipped_clean_files)
     crit_cnt = sum(1 for f in report.findings if f.severity == FindingSeverity.CRITICAL)
     high_cnt = sum(1 for f in report.findings if f.severity == FindingSeverity.HIGH)
-    cs = report.cost_summary
+    billed_in = sum(int(sp.get("gen_ai.usage.input_tokens", 0)) for sp in report.otel_Waterfall_spans)
+    billed_out = sum(int(sp.get("gen_ai.usage.output_tokens", 0)) for sp in report.otel_Waterfall_spans)
+    measured_usd = sum(
+        compute_turn_cost_usd(
+            str(sp.get("gen_ai.request.model", "gemini-3.8-flash")).split()[0],
+            int(sp.get("gen_ai.usage.input_tokens", 0)),
+            int(sp.get("gen_ai.usage.output_tokens", 0)),
+        )
+        for sp in report.otel_Waterfall_spans
+        if int(sp.get("gen_ai.usage.input_tokens", 0)) > 0 or int(sp.get("gen_ai.usage.output_tokens", 0)) > 0
+    )
 
     sections.append(
         render_kpi_row(
             [
-                ("✦ 0-TOK AST", f"{skipped}/{total_scanned} Clean", "$0.00 (0 Tokens)", G_GREEN),
+                ("✦ 0-TOK AST", f"{skipped}/{total_scanned} Clean", "Skipped Locally", G_GREEN),
                 ("◆ RISK ALERTS", f"{len(report.findings)} Findings", f"{crit_cnt} Crit • {high_cnt} High", G_RED if report.findings else G_GREEN),
-                ("● FINOPS SAVED", f"-{cs.savings_vs_naive_over_200k_pct}% Spend", f"${cs.mcpguard_tiered_2026_promo_usd:.2f} vs ${cs.naive_pro_over_200k_usd:,.0f}", G_YELLOW),
+                ("● SCAN SPEND", f"${measured_usd:.4f} Actual", f"{billed_in + billed_out} Billed Tokens", G_YELLOW),
                 ("▸ A2A v1.0 JWS", "Ed25519 OK" if jws_ok else "INVALID", f"ID {report.otel_trace_id[:11]}", G_BLUE),
             ],
             TOTAL_WIDTH,
         )
     )
 
-    # 2. ADK 2.0 Hybrid Graph Pipeline Box (4-Color Visual Flow, fits 92 inner cols with 0 truncation)
+    # 2. ADK 2.0 Hybrid Graph Pipeline Box
     dag_lines = [
         f"{G_GREEN}╭────────────────╮{RESET}   {G_BLUE}╭─────────────────╮{RESET}   {G_RED}╭──────────────────────╮{RESET}   {G_YELLOW}╭────────────────╮{RESET}",
-        f"{G_GREEN}│ 1. AST Filter  │{RESET}──▸{G_BLUE}│ 2. Triage Route │{RESET}─┬▸{G_RED}│ 3. AgentTool: Sec    │{RESET}─┬▸{G_YELLOW}│ 5. HITL Patch  │{RESET}",
+        f"{G_GREEN}│ 1. AST Filter  │──▸{G_BLUE}│ 2. Triage Route │─┬▸{G_RED}│ 3. AgentTool: Sec    │─┬▸{G_YELLOW}│ 5. HITL Patch  │{RESET}",
         f"{G_GREEN}│ 0 Tokens ($0)  │{RESET}   {G_BLUE}│ 3.1 Flash-Lite  │{RESET} │ {G_RED}│ Sync McpToolset [RO] │{RESET} │ {G_YELLOW}│ difflib+SARIF  │{RESET}",
         f"{G_GREEN}╰───────┬────────╯{RESET}   {G_BLUE}╰─────────────────╯{RESET} │ {G_RED}╰──────────────────────╯{RESET} │ {G_YELLOW}╰───────┬────────╯{RESET}",
         f"        │ {FG_MUTED}clean{RESET}                          │ {G_GREEN}╭──────────────────────╮{RESET} │         │",
@@ -367,22 +443,21 @@ def render_rich_audit_report(
                 f"{FG_MUTED}▸{RESET} {FG_CYAN}{BOLD}{col_loc}{RESET}"
             )
             if f.leak_type or f.leaked_evidence:
+                detail_lbl = _finding_detail_label(f.category)
                 what_str = f"{f.leak_type}: {f.leaked_evidence}" if f.leak_type else f.leaked_evidence
                 f_lines.append(
-                    f"    {G_RED}{BOLD}WHAT LEAKED :{RESET} {G_YELLOW}{what_str[:wrap_w - 14]}{RESET}"
+                    f"    {G_RED}{BOLD}{detail_lbl}:{RESET} {G_YELLOW}{what_str[:wrap_w - 14]}{RESET}"
                 )
             f_lines.append(
                 f"    {FG_MUTED}WHERE (FILE):{RESET} {FG_WHITE}{f.file_path} (Line {f.line_number}, Col {f.column_start}){RESET}"
             )
 
-            # Render 3-line Rust/Claude-Code style pinpoint source code snippet with ^^^ pointer
             if f.source_line:
                 f_lines.append(f"    {FG_MUTED}┌── Source Pinpoint {'─' * (wrap_w - 20)}{RESET}")
                 if f.context_before.strip():
                     b_trim = f.context_before[:code_max_w]
                     f_lines.append(f"    {FG_MUTED}│ {f.line_number - 1:>4} │ {b_trim}{RESET}")
 
-                # Window the offending line if very long & redact middle secret chars for safe screen-sharing
                 raw_src = _redact_secrets_in_line(f.source_line.replace("\t", "    "))
                 c_start = max(1, f.column_start)
                 c_len = max(1, f.column_end - f.column_start)
@@ -417,7 +492,7 @@ def render_rich_audit_report(
             )
         )
 
-    # 4. Google Cloud Trace Gantt Timeline + FinOps Benchmark
+    # 4. Google Cloud Trace Gantt Timeline
     max_dur = max((float(sp["duration_ms"]) for sp in report.otel_Waterfall_spans), default=1.0) or 1.0
     otel_lines: list[str] = [
         f"{FG_MUTED}W3C Traceparent: 00-{report.otel_trace_id}-{report.otel_Waterfall_spans[-1]['span_id'] if report.otel_Waterfall_spans else '0'*16}-01{RESET}",
@@ -444,29 +519,39 @@ def render_rich_audit_report(
         )
     )
 
-    # 5. FinOps Bar Chart Box
-    finops_lines = [
-        f"{G_RED}{'█' * 42}{RESET}  {BOLD}{FG_WHITE}${cs.naive_pro_over_200k_usd:>8,.2f}{RESET}  {FG_MUTED}Naive >200K Gemini 3.1 Pro Loop ($4/$18 cliff){RESET}",
-        f"{G_YELLOW}{'█' * 13}{'░' * 29}{RESET}  {BOLD}{FG_WHITE}${cs.naive_pro_compacted_usd:>8,.2f}{RESET}  {FG_MUTED}Compacted <=200K Gemini 3.1 Pro ($2/$12 tier){RESET}",
-        f"{G_GREEN}{'█' * 3}{'░' * 39}{RESET}  {BOLD}{G_GREEN}${cs.mcpguard_tiered_2026_promo_usd:>8,.2f}{RESET}  {BOLD}{FG_WHITE}MCPGuard-ADK Hybrid (-{cs.savings_vs_naive_over_200k_pct}% saved!){RESET}",
-        f"{G_BLUE}{'█' * 2}{'░' * 40}{RESET}  {BOLD}{FG_CYAN}${cs.mcpguard_async_batch_2027_usd:>8,.2f}{RESET}  {FG_MUTED}MCPGuard-ADK Async Batch (2027 Post-Promo){RESET}",
-    ]
-    sections.append(
-        render_closed_box(
-            f"✦ Late-2026 Gemini Rate-Card FinOps ({cs.pr_count:,} PR Audits)",
-            finops_lines,
-            border_color=G_GREEN,
-            right_tag=f"{PILL_GREEN} -95.4% COST {RESET}",
-        )
+    # 5. Simulated FinOps Benchmark Box (shown ONLY when cost-cliff findings exist or `--finops-sim` passed)
+    has_cost_finding = any(
+        f.category
+        in {
+            FindingCategory.COST_CLIFF_200K_UNCOMPACTED,
+            FindingCategory.MCP_CONTEXT_BLOAT_ROOT_TOOLSET,
+        }
+        for f in report.findings
     )
+    if show_finops_sim or has_cost_finding:
+        cs = report.cost_summary
+        finops_lines = [
+            f"{FG_MUTED}Rate-card projection across {cs.pr_count:,} PRs (250K uncompacted Pro vs tiered Flash-Lite/Flash):{RESET}",
+            f"{G_RED}{'█' * 42}{RESET}  {BOLD}{FG_WHITE}${cs.naive_pro_over_200k_usd:>8,.2f}{RESET}  {FG_MUTED}Naive >200K Gemini 3.1 Pro Loop ($4/$18 cliff){RESET}",
+            f"{G_YELLOW}{'█' * 13}{'░' * 29}{RESET}  {BOLD}{FG_WHITE}${cs.naive_pro_compacted_usd:>8,.2f}{RESET}  {FG_MUTED}Compacted <=200K Gemini 3.1 Pro ($2/$12 tier){RESET}",
+            f"{G_GREEN}{'█' * 3}{'░' * 39}{RESET}  {BOLD}{G_GREEN}${cs.mcpguard_tiered_2026_promo_usd:>8,.2f}{RESET}  {BOLD}{FG_WHITE}MCPGuard-ADK Tiered Model (-{cs.savings_vs_naive_over_200k_pct}% simulated){RESET}",
+            f"{G_BLUE}{'█' * 2}{'░' * 40}{RESET}  {BOLD}{FG_CYAN}${cs.mcpguard_async_batch_2027_usd:>8,.2f}{RESET}  {FG_MUTED}MCPGuard-ADK Async Batch (2027 Post-Promo){RESET}",
+        ]
+        sections.append(
+            render_closed_box(
+                f"✦ Simulated {cs.pr_count:,}-PR Gemini Rate-Card Model",
+                finops_lines,
+                border_color=G_GREEN,
+                right_tag=f"{PILL_YELLOW} SIMULATED {RESET}",
+            )
+        )
 
-    # 6. Claude-Code-Style Tinted Gutter Diff Viewer (Real Line Numbers + Template Deduplication)
+    # 6. Claude-Code-Style Tinted Gutter Diff Viewer
     if report.unified_diff_patch:
         diff_rows: list[str] = []
         inner_diff_w = TOTAL_WIDTH - 4
         hunk_re = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
-        # Split patch into per-file blocks (`--- a/...`)
         file_blocks = [b for b in report.unified_diff_patch.split("\n\n") if b.strip()]
         body_signature_counts: dict[str, list[str]] = {}
         rendered_blocks: list[tuple[str, str, list[str]]] = []
@@ -498,13 +583,15 @@ def render_rich_audit_report(
                     diff_rows.append(f" {FG_CYAN}{DIM}{raw_line}{RESET}")
                 elif raw_line.startswith("+"):
                     styled = pad_ansi(
-                        f" {G_GREEN}{BOLD}{new_ln:>4} + │ {raw_line[1:]}{RESET}", inner_diff_w
+                        f" {G_GREEN}{BOLD}{new_ln:>4} + │ {_redact_secrets_in_line(raw_line[1:])}{RESET}",
+                        inner_diff_w,
                     )
                     diff_rows.append(f"{DIFF_BG_ADD}{styled}{RESET}")
                     new_ln += 1
                 elif raw_line.startswith("-"):
                     styled = pad_ansi(
-                        f" {G_RED}{old_ln:>4} - │ {raw_line[1:]}{RESET}", inner_diff_w
+                        f" {G_RED}{old_ln:>4} - │ {_redact_secrets_in_line(raw_line[1:])}{RESET}",
+                        inner_diff_w,
                     )
                     diff_rows.append(f"{DIFF_BG_DEL}{styled}{RESET}")
                     old_ln += 1
@@ -516,7 +603,6 @@ def render_rich_audit_report(
                     old_ln += 1
                     new_ln += 1
 
-        # Summarize any collapsed identical boilerplate template diffs across monorepo subprojects
         for _, matching_files in body_signature_counts.items():
             if len(matching_files) > 2:
                 extra = matching_files[2:]
@@ -564,15 +650,7 @@ def render_rich_audit_report(
             )
         )
 
-    # 8. Dynamically Verified Google Cloud Scorecard
-    otlp_ok = len(report.otlp_trace_export.get("resourceSpans", [])) == 1
-    checks = [
-        (True, "ADK 2.0 Hybrid Graph", f"Skipped {skipped} clean files locally at $0.00 (0 tokens)"),
-        (isolation_ok, "Zero Context Bloat", "Sync McpToolset isolated in AgentTool (read-only)"),
-        (jws_ok, "A2A v1.0 Ed25519 + JCS", "RFC 8037 EdDSA verified over RFC 8785 JCS AgentCard"),
-        (otel_ok and otlp_ok, "Cloud Trace OTLP SDK", "EVENT_ONLY active; W3C resourceSpans exported"),
-        (True, "MCP Stdio & SARIF Gate", "JSON-RPC 2.0 serve-mcp + SARIF v2.1.0 + .test.json"),
-    ]
+    # 8. Dynamically Computed Google Cloud & ADK 2.0 Verification Scorecard (0 Hardcoded Booleans)
     passed = sum(1 for ok, _, _ in checks if ok)
     sc_rows = [
         (
@@ -587,7 +665,7 @@ def render_rich_audit_report(
             f"✦ Google Cloud & ADK 2.0 Verification Scorecard ({passed}/{len(checks)})",
             sc_rows,
             border_color=G_GREEN if passed == len(checks) else G_RED,
-            right_tag=f"{PILL_GREEN} 100% VERIFIED {RESET}" if passed == len(checks) else "",
+            right_tag=f"{PILL_GREEN} {passed}/{len(checks)} PASSED {RESET}" if passed == len(checks) else f"{PILL_RED} {passed}/{len(checks)} {RESET}",
         )
     )
 
@@ -595,7 +673,7 @@ def render_rich_audit_report(
 
 
 def run_interactive_terminal_repl(scan_callback: Callable[[str, bool, bool], int]) -> int:
-    """Interactive Gemini-CLI / Claude-Code slash-command terminal shell!"""
+    """Interactive Gemini-CLI / Claude-Code slash-command terminal shell."""
     enable_windows_ansi()
     print(render_google_hero_banner(TOTAL_WIDTH))
     help_rows = [
@@ -654,7 +732,6 @@ def run_interactive_terminal_repl(scan_callback: Callable[[str, bool, bool], int
             scan_callback(parts[1] if len(parts) > 1 else "./examples", False, False)
             continue
 
-        # Smartly handle full CLI commands pasted inside the interactive `╰─✦ ❯` prompt
         cleaned_raw = raw
         for prefix in ("python -m mcpguard_adk.cli", "python3 -m mcpguard_adk.cli", "mcpguard"):
             if cleaned_raw.lower().startswith(prefix):
@@ -667,7 +744,6 @@ def run_interactive_terminal_repl(scan_callback: Callable[[str, bool, bool], int
 
         live_in_cmd = "--live" in cleaned_raw
         approve_in_cmd = "--approve-patches" in cleaned_raw
-        # Strip CLI flags to isolate the target path
         path_tokens = [tok for tok in cleaned_raw.split() if not tok.startswith("--")]
         target_candidate = " ".join(path_tokens).strip().strip('"').strip("'") or "./examples"
 

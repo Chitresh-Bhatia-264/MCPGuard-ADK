@@ -19,6 +19,10 @@ inputs:
     description: "Severity threshold to fail CI check (none, critical, high, medium)"
     required: false
     default: "critical"
+  finops-sim:
+    description: "Include simulated 1,000-PR Gemini rate-card benchmark in output"
+    required: false
+    default: "false"
   github-token:
     description: "GitHub token to post inline PR review suggestions"
     required: false
@@ -38,19 +42,28 @@ runs:
 
     - name: Install MCPGuard-ADK
       shell: bash
-      run: pip install "${{ github.action_path }}"
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+      run: pip install "$ACTION_DIR"
 
     - name: Run MCPGuard-ADK PR Review & Inline Suggestion Bot
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        INPUT_TARGET_PATH: ${{ inputs.target-path }}
+        INPUT_GIT_DIFF_ONLY: ${{ inputs.git-diff-only }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_FINOPS_SIM: ${{ inputs.finops-sim }}
         OTEL_SEMCONV_STABILITY_OPT_IN: "gen_ai_latest_experimental"
         OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "EVENT_ONLY"
         ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS: "false"
       run: |
-        DIFF_FLAG=""
-        if [ "${{ inputs.git-diff-only }}" = "true" ]; then
-          DIFF_FLAG="--git-diff"
+        args=("pr-review" "$INPUT_TARGET_PATH" "--fail-on" "$INPUT_FAIL_ON")
+        if [ "$INPUT_GIT_DIFF_ONLY" = "true" ]; then
+          args+=("--git-diff")
         fi
-        mcpguard pr-review "${{ inputs.target-path }}" $DIFF_FLAG --fail-on "${{ inputs.fail-on }}"
+        if [ "$INPUT_FINOPS_SIM" = "true" ]; then
+          args+=("--finops-sim")
+        fi
+        mcpguard "${args[@]}"

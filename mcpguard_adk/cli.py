@@ -1,17 +1,21 @@
 """Command-Line Interface (`mcpguard`) for MCPGuard-ADK.
 
 Commands:
-- `mcpguard scan [path] [--git-diff] [--live] [--approve-patches] [--emit-test-json PATH] [--emit-sarif PATH] [--export-otel PATH] [--json]`
-- `mcpguard serve-mcp`      (Starts live JSON-RPC 2.0 MCP Stdio server for Cursor / Antigravity / Gemini CLI)
-- `mcpguard serve-a2a`      (Starts A2A Protocol v1.0 HTTP+JSON & SSE server with `/.well-known/jwks.json`)
-- `mcpguard agent-card`     (Prints & cryptographically verifies Ed25519/JCS signed A2A v1.0 AgentCard)
-- `mcpguard cost-sim`       (Runs transparent Late-2026 Gemini rate-card FinOps simulation)
+- `mcpguard scan [path] [--git-diff] [--live] [--finops-sim] [--approve-patches] [--fail-on ...] [--emit-test-json PATH] [--emit-sarif PATH] [--emit-dashboard PATH] [--export-otel PATH] [--json]`
+- `mcpguard pr-review [path] [--git-diff] [--finops-sim] [--fail-on ...]`
+- `mcpguard shell`
+- `mcpguard serve-mcp`
+- `mcpguard serve-a2a`
+- `mcpguard ui`
+- `mcpguard agent-card`
+- `mcpguard cost-sim`
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -44,6 +48,20 @@ def _run_interactive_voice_debrief_demo(report: AuditReport) -> list[dict[str, s
     return list(session.iter_live_events())
 
 
+def _evaluate_fail_on_exit_code(report: AuditReport, fail_on: str) -> int:
+    if fail_on == "none":
+        return 0
+    threshold_map = {
+        "critical": {FindingSeverity.CRITICAL},
+        "high": {FindingSeverity.CRITICAL, FindingSeverity.HIGH},
+        "medium": {FindingSeverity.CRITICAL, FindingSeverity.HIGH, FindingSeverity.MEDIUM},
+    }
+    blocking = threshold_map.get(fail_on, set())
+    if any(f.severity in blocking for f in report.findings):
+        return 2
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="mcpguard",
@@ -60,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     scan_p.add_argument("--emit-sarif", type=str, default="", help="Write SARIF v2.1.0 report for GitHub Code Scanning.")
     scan_p.add_argument("--emit-dashboard", type=str, default="", help="Write standalone Google Material 3 HTML Studio dashboard.")
     scan_p.add_argument("--export-otel", type=str, default="", help="Export OTLP/JSON `resourceSpans` trace file for Jaeger/Cloud Trace.")
+    scan_p.add_argument("--finops-sim", action="store_true", help="Always display the simulated 1,000-PR Gemini rate-card model.")
     scan_p.add_argument("--live", action="store_true", help="Launch Stage 6 ADK Live Voice Incident Debrief (`runner.run_live()`).")
     scan_p.add_argument(
         "--fail-on",
@@ -92,13 +111,14 @@ def main(argv: list[str] | None = None) -> int:
     ui_p.add_argument("--port", type=int, default=8090)
     ui_p.add_argument("--no-open", action="store_true", help="Do not auto-open browser window.")
 
-    # `mcpguard shell` (Claude Code / Gemini CLI style interactive slash-command REPL)
+    # `mcpguard shell`
     subparsers.add_parser("shell", help="Launch interactive Gemini CLI / Claude Code style terminal shell.")
 
-    # `mcpguard pr-review` (1-Click GitHub PR Inline Suggestion & FinOps Bot)
+    # `mcpguard pr-review`
     pr_p = subparsers.add_parser("pr-review", help="Generate or post inline GitHub PR review suggestions (`suggestion` blocks).")
     pr_p.add_argument("target", nargs="?", default=".", help="Repository path to scan (default: .)")
     pr_p.add_argument("--git-diff", action="store_true", help="Scan only git-modified files in the PR.")
+    pr_p.add_argument("--finops-sim", action="store_true", help="Include simulated 1,000-PR rate-card model in PR summary.")
     pr_p.add_argument("--repo", type=str, default="", help="GitHub owner/repo (defaults to GITHUB_REPOSITORY env).")
     pr_p.add_argument("--pr", type=int, default=0, help="Pull request number (defaults to GITHUB_EVENT_PATH).")
     pr_p.add_argument("--dry-run-output", type=str, default="", help="Write PR review payload JSON to file without posting.")
@@ -141,14 +161,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "pr-review":
-        import os
+        if not Path(args.target).exists():
+            print(f"Error: Target path '{args.target}' does not exist.", file=sys.stderr)
+            return 1
 
         report = MCPGuardGraphWorkflow().run(
             target_path=args.target,
             hitl_approved=False,
             git_diff_only=bool(args.git_diff),
         )
-        payload = build_github_pr_review_payload(report, repo_root=args.target)
+        payload = build_github_pr_review_payload(
+            report,
+            repo_root=args.target,
+            include_finops_sim=bool(args.finops_sim),
+        )
 
         if args.dry_run_output:
             out_p = Path(args.dry_run_output)
@@ -166,19 +192,19 @@ def main(argv: list[str] | None = None) -> int:
                     review_payload=payload,
                     github_token=token,
                 )
-                print(json.dumps(res, indent=2))
+                if not res.get("posted"):
+                    print(
+                        f"Warning: Could not post GitHub PR comment (read-only fork token or API error: "
+                        f"{res.get('fallback_error', 'unknown')}). Printing report to job log:",
+                        file=sys.stderr,
+                    )
+                    print(payload["body"])
+                else:
+                    print(json.dumps(res, indent=2))
             else:
                 print(payload["body"])
 
-        if args.fail_on != "none":
-            threshold_map = {
-                "critical": {FindingSeverity.CRITICAL},
-                "high": {FindingSeverity.CRITICAL, FindingSeverity.HIGH},
-                "medium": {FindingSeverity.CRITICAL, FindingSeverity.HIGH, FindingSeverity.MEDIUM},
-            }
-            if any(f.severity in threshold_map.get(args.fail_on, set()) for f in report.findings):
-                return 2
-        return 0
+        return _evaluate_fail_on_exit_code(report, args.fail_on)
 
     def _quick_scan(path_str: str, approve_flag: bool, live_flag: bool) -> int:
         rep = MCPGuardGraphWorkflow().run(target_path=path_str, hitl_approved=approve_flag)
@@ -189,17 +215,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "shell" or (args.command is None and sys.stdin.isatty() and argv is None):
         return run_interactive_terminal_repl(_quick_scan)
 
-    # Default or `scan`
     target = getattr(args, "target", "./examples")
     if not Path(target).exists():
         print(f"Error: Target path '{target}' does not exist.", file=sys.stderr)
         return 1
+
     git_diff_only = getattr(args, "git_diff", False)
     approve = getattr(args, "approve_patches", False)
     emit_test_path = getattr(args, "emit_test_json", "")
     emit_sarif_path = getattr(args, "emit_sarif", "")
     emit_dashboard_path = getattr(args, "emit_dashboard", "")
     export_otel_path = getattr(args, "export_otel", "")
+    finops_sim = getattr(args, "finops_sim", False)
     live_mode = getattr(args, "live", False)
     as_json = getattr(args, "json", False)
 
@@ -235,20 +262,9 @@ def main(argv: list[str] | None = None) -> int:
     if as_json:
         print(json.dumps(report.model_dump(), indent=2))
     else:
-        print(render_rich_audit_report(report, live_events=live_events))
+        print(render_rich_audit_report(report, live_events=live_events, show_finops_sim=finops_sim))
 
-    fail_on = getattr(args, "fail_on", "none")
-    if fail_on != "none":
-        threshold_map = {
-            "critical": {FindingSeverity.CRITICAL},
-            "high": {FindingSeverity.CRITICAL, FindingSeverity.HIGH},
-            "medium": {FindingSeverity.CRITICAL, FindingSeverity.HIGH, FindingSeverity.MEDIUM},
-        }
-        blocking = threshold_map.get(fail_on, set())
-        if any(f.severity in blocking for f in report.findings):
-            return 2
-
-    return 0
+    return _evaluate_fail_on_exit_code(report, getattr(args, "fail_on", "none"))
 
 
 if __name__ == "__main__":
