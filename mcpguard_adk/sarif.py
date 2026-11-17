@@ -69,8 +69,8 @@ def build_sarif_report(report: AuditReport) -> dict[str, Any]:
                 "tool": {
                     "driver": {
                         "name": "MCPGuard-ADK",
-                        "version": "0.2.0",
-                        "informationUri": "https://github.com/example/mcpguard-adk",
+                        "version": "0.3.0",
+                        "informationUri": "https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK",
                         "rules": list(rules_by_id.values()),
                     }
                 },

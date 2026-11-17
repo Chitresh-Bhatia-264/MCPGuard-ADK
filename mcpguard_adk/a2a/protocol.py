@@ -197,7 +197,7 @@ def build_signed_agent_card(
         "version": "0.3.0",
         "provider": {
             "organization": "MCPGuard-ADK Open Source",
-            "url": "https://github.com/mcpguard-adk/mcpguard-adk",
+            "url": "https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK",
         },
         "supportedInterfaces": [
             {
