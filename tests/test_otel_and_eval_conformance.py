@@ -90,3 +90,30 @@ def test_cli_fail_on_severity_exit_code_gate() -> None:
     assert main(["scan", examples_dir, "--fail-on", "critical", "--json"]) == 2
     # Clean directory returns exit code 0 even with --fail-on medium
     assert main(["scan", clean_dir, "--fail-on", "medium", "--json"]) == 0
+
+
+def test_github_pr_review_inline_suggestions_and_uvx_entrypoints(tmp_path: Path) -> None:
+    import tomllib
+    from mcpguard_adk.agent import MCPGuardGraphWorkflow
+    from mcpguard_adk.cli import main
+    from mcpguard_adk.github_pr_bot import build_github_pr_review_payload
+
+    root_dir = Path(__file__).resolve().parent.parent
+    pyproject = tomllib.loads((root_dir / "pyproject.toml").read_text(encoding="utf-8"))
+    scripts = pyproject["project"]["scripts"]
+    assert "mcpguard" in scripts and "mcpguard-adk" in scripts
+
+    examples_dir = root_dir / "examples"
+    report = MCPGuardGraphWorkflow().run(examples_dir)
+    pr_payload = build_github_pr_review_payload(report, repo_root=examples_dir)
+
+    assert pr_payload["event"] == "COMMENT"
+    assert len(pr_payload["comments"]) >= 3
+    # Verify 1-click GitHub ```suggestion block is generated for Python ADK fixes
+    assert any("```suggestion" in c["body"] for c in pr_payload["comments"])
+    # Verify plaintext example token is auto-redacted inside the PR comment body
+    assert "ghp_1234567890abcdef1234567890abcdef1234" not in pr_payload["body"]
+
+    dry_out = tmp_path / "pr_review.json"
+    rc = main(["pr-review", str(examples_dir), "--dry-run-output", str(dry_out)])
+    assert rc == 0 and dry_out.is_file()

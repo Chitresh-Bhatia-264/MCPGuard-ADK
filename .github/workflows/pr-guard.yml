@@ -1,0 +1,27 @@
+name: MCPGuard-ADK Pull Request Review Bot
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  mcpguard-pr-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run MCPGuard-ADK Inline PR Suggestion Bot
+        uses: ./
+        with:
+          target-path: "."
+          git-diff-only: "true"
+          fail-on: "critical"
+          github-token: ${{ secrets.GITHUB_TOKEN }}

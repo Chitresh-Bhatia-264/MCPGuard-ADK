@@ -1,0 +1,56 @@
+name: "MCPGuard-ADK Security & FinOps PR Auditor"
+description: "Audits MCP configs, secrets, Python ADK graphs, and >200K Gemini cost cliffs; posts 1-click inline PR review fixes."
+author: "Chitresh Bhatia"
+
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  target-path:
+    description: "Directory or file path to audit"
+    required: false
+    default: "."
+  git-diff-only:
+    description: "Only audit files modified in the pull request"
+    required: false
+    default: "true"
+  fail-on:
+    description: "Severity threshold to fail CI check (none, critical, high, medium)"
+    required: false
+    default: "critical"
+  github-token:
+    description: "GitHub token to post inline PR review suggestions"
+    required: false
+    default: ""
+  gemini-api-key:
+    description: "Optional Google AI Studio / Gemini API key for live sub-agent summaries"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install MCPGuard-ADK
+      shell: bash
+      run: pip install "${{ github.action_path }}"
+
+    - name: Run MCPGuard-ADK PR Review & Inline Suggestion Bot
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        OTEL_SEMCONV_STABILITY_OPT_IN: "gen_ai_latest_experimental"
+        OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "EVENT_ONLY"
+        ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS: "false"
+      run: |
+        DIFF_FLAG=""
+        if [ "${{ inputs.git-diff-only }}" = "true" ]; then
+          DIFF_FLAG="--git-diff"
+        fi
+        mcpguard pr-review "${{ inputs.target-path }}" $DIFF_FLAG --fail-on "${{ inputs.fail-on }}"

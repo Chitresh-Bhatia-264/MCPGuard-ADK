@@ -50,8 +50,15 @@ dev = [
     "ruff>=0.6.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK"
+Repository = "https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK"
+Issues = "https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK/issues"
+CI = "https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK/actions"
+
 [project.scripts]
 mcpguard = "mcpguard_adk.cli:main"
+mcpguard-adk = "mcpguard_adk.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

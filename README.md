@@ -51,20 +51,18 @@
 
 ## 30-Second Quickstart (`$0` Offline Scan — No API Key Required)
 
-Run on **Python 3.11+** against any local repository, monorepo, or the included deliberately vulnerable `./examples` suite:
+Run directly with **`uvx`** / **`pip`** on **Python 3.11+**, or install from source:
 
 ```bash
+# Option A: Zero-install one-liner via uvx / pip (once published on PyPI, or directly from GitHub)
+uvx --from git+https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK mcpguard scan .
+# (After PyPI release: `pip install mcpguard-adk` or `uvx mcpguard-adk scan .`)
+
+# Option B: Clone & run the built-in vulnerable examples + interactive shell
 git clone https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK.git
 cd MCPGuard-ADK
 pip install -e ".[dev]"
-
-# 1. Run full scan + Live Voice Barge-In debrief on sample vulnerabilities
 python -m mcpguard_adk.cli scan ./examples --live
-
-# 2. Scan your own polyglot workspace (Python ADK + MCP + React/TS + .env)
-python -m mcpguard_adk.cli scan /path/to/your/workspace
-
-# 3. Launch the interactive Gemini CLI / Claude Code style slash-command shell
 python -m mcpguard_adk.cli shell
 ```
 
@@ -140,7 +138,30 @@ python -m mcpguard_adk.cli cost-sim --prs 1000
 ```
 Exposes `mcpguard_audit_repository`, `mcpguard_simulate_cost_cliff`, and `mcpguard_verify_agent_card` over JSON-RPC 2.0 stdio (supporting both newline-delimited and `Content-Length` framing).
 
-### 2. Cross-Framework A2A Protocol v1.0 Server (`Ed25519` + `RFC 8785 JCS`)
+### 2. 1-Click GitHub Pull Request Bot (Composite GitHub Action)
+Add `.github/workflows/mcpguard.yml` to any repository—whenever a teammate modifies `mcp.json`, `.env`, React/TS, or an ADK agent, **MCPGuard-ADK** posts **1-click inline `suggestion` commits** and blocks critical leaks:
+
+```yaml
+name: MCPGuard-ADK PR Bot
+on: [pull_request]
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Chitresh-Bhatia-264/MCPGuard-ADK@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fail-on: "critical"
+```
+
+### 3. Cross-Framework A2A Protocol v1.0 Server (`Ed25519` + `RFC 8785 JCS`)
 ```bash
 # Start HTTP+JSON and Server-Sent Events (SSE) A2A v1.0 endpoint
 python -m mcpguard_adk.cli serve-a2a --host 127.0.0.1 --port 8080
@@ -167,6 +188,9 @@ python -m mcpguard_adk.cli scan ./examples --live --approve-patches \
 
 # Pull-Request CI Gate (scan only git-modified files; exit code 2 on CRITICAL/HIGH)
 python -m mcpguard_adk.cli scan . --git-diff --fail-on high
+
+# Generate or post 1-Click GitHub PR Inline Review Suggestions (```suggestion blocks)
+python -m mcpguard_adk.cli pr-review . --git-diff --fail-on critical
 
 # Launch interactive browser visualizer (ADK 2.0 Graph + >200K Cliff Sliders)
 python -m mcpguard_adk.cli ui ./examples

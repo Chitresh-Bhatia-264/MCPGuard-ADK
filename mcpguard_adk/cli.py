@@ -24,6 +24,11 @@ from mcpguard_adk.a2a.server import run_a2a_http_server
 from mcpguard_adk.agent import MCPGuardGraphWorkflow, to_mcp_server
 from mcpguard_adk.agents.voice_debrief import LiveVoiceDebriefSession
 from mcpguard_adk.cost_engine import simulate_pr_audit_benchmarks
+from mcpguard_adk.github_pr_bot import (
+    build_github_pr_review_payload,
+    post_github_pr_review,
+    resolve_pr_number_from_github_env,
+)
 from mcpguard_adk.sarif import build_sarif_report
 from mcpguard_adk.schemas import AuditReport, FindingSeverity
 from mcpguard_adk.tui import render_rich_audit_report, run_interactive_terminal_repl
@@ -90,6 +95,20 @@ def main(argv: list[str] | None = None) -> int:
     # `mcpguard shell` (Claude Code / Gemini CLI style interactive slash-command REPL)
     subparsers.add_parser("shell", help="Launch interactive Gemini CLI / Claude Code style terminal shell.")
 
+    # `mcpguard pr-review` (1-Click GitHub PR Inline Suggestion & FinOps Bot)
+    pr_p = subparsers.add_parser("pr-review", help="Generate or post inline GitHub PR review suggestions (`suggestion` blocks).")
+    pr_p.add_argument("target", nargs="?", default=".", help="Repository path to scan (default: .)")
+    pr_p.add_argument("--git-diff", action="store_true", help="Scan only git-modified files in the PR.")
+    pr_p.add_argument("--repo", type=str, default="", help="GitHub owner/repo (defaults to GITHUB_REPOSITORY env).")
+    pr_p.add_argument("--pr", type=int, default=0, help="Pull request number (defaults to GITHUB_EVENT_PATH).")
+    pr_p.add_argument("--dry-run-output", type=str, default="", help="Write PR review payload JSON to file without posting.")
+    pr_p.add_argument(
+        "--fail-on",
+        choices=["none", "critical", "high", "medium"],
+        default="none",
+        help="Return exit code 2 when findings meet or exceed severity threshold.",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "serve-mcp":
@@ -119,6 +138,46 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "ui":
         report = MCPGuardGraphWorkflow().run(target_path=args.target, hitl_approved=False)
         serve_studio_ui(report, host=args.host, port=args.port, open_browser=not args.no_open)
+        return 0
+
+    if args.command == "pr-review":
+        import os
+
+        report = MCPGuardGraphWorkflow().run(
+            target_path=args.target,
+            hitl_approved=False,
+            git_diff_only=bool(args.git_diff),
+        )
+        payload = build_github_pr_review_payload(report, repo_root=args.target)
+
+        if args.dry_run_output:
+            out_p = Path(args.dry_run_output)
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            out_p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            print(f"Wrote PR review payload ({len(payload['comments'])} inline suggestions) -> {out_p}")
+        else:
+            repo = args.repo or os.environ.get("GITHUB_REPOSITORY", "").strip()
+            pr_num = args.pr or resolve_pr_number_from_github_env()
+            token = os.environ.get("GITHUB_TOKEN", "").strip()
+            if repo and pr_num and token:
+                res = post_github_pr_review(
+                    repo=repo,
+                    pr_number=int(pr_num),
+                    review_payload=payload,
+                    github_token=token,
+                )
+                print(json.dumps(res, indent=2))
+            else:
+                print(payload["body"])
+
+        if args.fail_on != "none":
+            threshold_map = {
+                "critical": {FindingSeverity.CRITICAL},
+                "high": {FindingSeverity.CRITICAL, FindingSeverity.HIGH},
+                "medium": {FindingSeverity.CRITICAL, FindingSeverity.HIGH, FindingSeverity.MEDIUM},
+            }
+            if any(f.severity in threshold_map.get(args.fail_on, set()) for f in report.findings):
+                return 2
         return 0
 
     def _quick_scan(path_str: str, approve_flag: bool, live_flag: bool) -> int:
