@@ -1,5 +1,5 @@
 # MCPGuard-ADK
-
+ 
 **Open-source multi-agent Model Context Protocol (MCP) supply-chain, secret-leak, >200K token cost-cliff, and tool-trajectory auditor engineered on Google Agent Development Kit (ADK) 2.0, Agent2Agent (A2A) Protocol v1.0, and OpenTelemetry.**
 
 [![CI & Conformance](https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK/actions/workflows/ci.yml/badge.svg)](https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK/actions)
