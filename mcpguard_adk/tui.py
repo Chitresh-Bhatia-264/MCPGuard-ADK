@@ -26,8 +26,30 @@ from mcpguard_adk.a2a.protocol import (
     verify_agent_card_jws,
 )
 from mcpguard_adk.agent import readonly_filesystem_mcp_toolset, root_agent
+from mcpguard_adk.nodes.prefilter import NAMED_SECRET_PATTERNS
 from mcpguard_adk.schemas import AuditReport, FindingSeverity
 from mcpguard_adk.telemetry.otel import validate_otel_env_safety
+
+
+def _redact_secrets_in_line(line: str) -> str:
+    """Redact middle characters of live API keys/URIs in terminal output (safe for screen-sharing/CI logs)."""
+    redacted = line
+    for _, pat in NAMED_SECRET_PATTERNS:
+        def _repl(m: re.Match[str]) -> str:
+            tok = m.group(1)
+            if "://" in tok and "@" in tok:
+                # Redact password in `scheme://user:password@host`
+                scheme_rest = tok.split("://", 1)
+                creds_host = scheme_rest[1].split("@", 1)
+                user_part = creds_host[0].split(":", 1)[0]
+                masked_creds = f"{user_part}:{'•' * max(4, len(creds_host[0]) - len(user_part) - 1)}"
+                return f"{scheme_rest[0]}://{masked_creds}@{creds_host[1]}"
+            if len(tok) <= 12:
+                return tok[:4] + ("•" * (len(tok) - 4))
+            return tok[:8] + ("•" * (len(tok) - 12)) + tok[-4:]
+
+        redacted = pat.sub(_repl, redacted)
+    return redacted
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -360,8 +382,8 @@ def render_rich_audit_report(
                     b_trim = f.context_before[:code_max_w]
                     f_lines.append(f"    {FG_MUTED}│ {f.line_number - 1:>4} │ {b_trim}{RESET}")
 
-                # Window the offending line if very long so the column pointer stays visible
-                raw_src = f.source_line.replace("\t", "    ")
+                # Window the offending line if very long & redact middle secret chars for safe screen-sharing
+                raw_src = _redact_secrets_in_line(f.source_line.replace("\t", "    "))
                 c_start = max(1, f.column_start)
                 c_len = max(1, f.column_end - f.column_start)
                 win_offset = 0
