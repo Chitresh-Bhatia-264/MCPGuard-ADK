@@ -194,7 +194,7 @@ def build_signed_agent_card(
             "Multi-agent MCP supply-chain, >200K token cost-cliff, and tool-trajectory auditor "
             "built on Google ADK 2.0, A2A Protocol v1.0, and OpenTelemetry."
         ),
-        "version": "0.3.2",
+        "version": "0.3.3",
         "provider": {
             "organization": "MCPGuard-ADK Open Source",
             "url": "https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK",

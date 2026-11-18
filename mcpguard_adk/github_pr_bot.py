@@ -245,7 +245,7 @@ def post_github_pr_review(
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "MCPGuard-ADK-PR-Bot/0.3.2",
+        "User-Agent": "MCPGuard-ADK-PR-Bot/0.3.3",
     }
     reviews_url = f"{api_base.rstrip('/')}/repos/{repo}/pulls/{pr_number}/reviews"
     req = urllib.request.Request(

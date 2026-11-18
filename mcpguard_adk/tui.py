@@ -236,7 +236,7 @@ def render_google_hero_banner(width: int = TOTAL_WIDTH) -> str:
         f"{PILL_RED} A2A v1.0 Ed25519/JCS {RESET} "
         f"{PILL_YELLOW} Gemini FinOps {RESET} "
         f"{PILL_GREEN} Cloud Trace OTLP {RESET} "
-        f"{FG_MUTED}v0.3.2{RESET}"
+        f"{FG_MUTED}v0.3.3{RESET}"
     )
 
     body = [spectrum, "", *logo_lines, "", subtitle, spectrum]
