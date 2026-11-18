@@ -1,0 +1,1 @@
+{"mcpServers":{"fs":{"command":"npx","args":["@modelcontextprotocol/server-filesystem@2026.11.1","./workspace"],"tool_filter":["list_directory","read_file"]}}}
