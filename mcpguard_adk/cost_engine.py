@@ -61,6 +61,16 @@ RATE_CARDS_2026: dict[str, ModelRateCard] = {
         cache_storage_per_1m_per_hour=4.50,
         notes="GA Gemini 2.5 Pro rate card (2x input cliff >200K tokens).",
     ),
+    "gemini-3.5-flash-lite": ModelRateCard(
+        model_id="gemini-3.5-flash-lite",
+        input_per_1m_le_200k=0.25,
+        output_per_1m_le_200k=1.50,
+        input_per_1m_gt_200k=0.25,
+        output_per_1m_gt_200k=1.50,
+        cache_read_per_1m=0.025,
+        cache_storage_per_1m_per_hour=0.25,
+        notes="Gemini 3.5 Flash-Lite rate card ($0.25 input / $1.50 output per 1M tokens).",
+    ),
     "gemini-3.1-flash-lite": ModelRateCard(
         model_id="gemini-3.1-flash-lite",
         input_per_1m_le_200k=0.25,

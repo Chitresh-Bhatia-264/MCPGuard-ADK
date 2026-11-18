@@ -137,8 +137,19 @@ def _match_secret_type(val_str: str) -> tuple[str, str] | None:
             if not any(ch.isdigit() or ch.isupper() for ch in suffix):
                 continue
         if "://" in tok and "@" in tok:
-            creds = tok.split("://", 1)[1].split("@", 1)[0].lower()
+            after_scheme = tok.split("://", 1)[1]
+            creds_raw, host_part = after_scheme.split("@", 1)
+            creds = creds_raw.lower()
+            host_only = host_part.split("/", 1)[0].split("?", 1)[0].split(":", 1)[0].lower()
             if creds in {"user:pass", "user:password", "user:secret", "username:password", "u:secret"}:
+                continue
+            if host_only in {"localhost", "127.0.0.1", "0.0.0.0"} and creds in {
+                "postgres:postgres",
+                "root:root",
+                "admin:admin",
+                "guest:guest",
+                "default:default",
+            }:
                 continue
         return label, tok
     return None

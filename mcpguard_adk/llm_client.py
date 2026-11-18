@@ -81,10 +81,10 @@ def call_gemini_generate_content(
             "estimated_dry_run_input_tokens": estimated_in,
         }
 
-    # Try preferred model first, falling back to GA Gemini 2.5 tier equivalent if preview alias is unavailable
+    # Try preferred model first, falling back to current Flash-Lite / GA Gemini tiers if alias is unavailable
     candidate_models = [preferred_model]
-    if "lite" in preferred_model and "gemini-2.5-flash-lite" not in candidate_models:
-        candidate_models.append("gemini-2.5-flash-lite")
+    if "lite" in preferred_model and "gemini-3.5-flash-lite" not in candidate_models:
+        candidate_models.append("gemini-3.5-flash-lite")
     if "pro" in preferred_model and "gemini-2.5-pro" not in candidate_models:
         candidate_models.append("gemini-2.5-pro")
     if "gemini-2.5-flash" not in candidate_models:

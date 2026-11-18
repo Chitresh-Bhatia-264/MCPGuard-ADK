@@ -156,7 +156,18 @@ Reproduce these calculations via CLI:
 python -m mcpguard_adk.cli cost-sim --prs 1000
 ```
 
-> **Measured vs. Simulated Spend:** Offline Stage 1 AST/manifest scans consume **`0` billed LLM tokens (`$0.0000` actual)**—including across all `12,372` files in the 10-repository public benchmark below. When `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is set, Stages 2–4 record exact live `prompt_token_count`, `candidates_token_count`, and `thoughts_token_count` from `google-genai` `usage_metadata` and compute actual USD spend right beside the `SIMULATED` 1,000-PR rate-card model.
+> **Measured Live Gemini API Audit vs. Simulated 1,000-PR Model:**
+> - **Clean Repository / Clean PR (`Stage 1` Short-Circuit):** **`0` billed LLM tokens (`$0.000000` actual)**—verified across all `12,372` files in the 10-repository public benchmark below.
+> - **Measured Live Gemini API Audit on `./examples` (`8` findings across `3` files, `GEMINI_API_KEY` active):**
+>
+> | Workflow Stage | Live Model Executed | Measured Input Tokens | Measured Output Tokens | Published Rate Applied | Actual Billed Cost (USD) |
+> | :--- | :--- | ---: | ---: | :--- | ---: |
+> | **Stage 1: AST Pre-Filter** | `deterministic-code-node` | `0` | `0` | `$0` | **`$0.000000`** |
+> | **Stage 2: Triage Router** | `gemini-3.1-flash-lite` | `305` | `379` | `$0.25` / `$1.50` per 1M | **`$0.000645`** |
+> | **Stage 3: Security `AgentTool`** | `gemini-2.5-flash` | `367` | `20` | `$0.30` / `$2.50` per 1M | **`$0.000160`** |
+> | **Stage 4: FinOps `AgentTool`** | `gemini-2.5-flash` | `328` | `21` | `$0.30` / `$2.50` per 1M | **`$0.000151`** |
+> | **Stage 5: HITL `difflib` Gate** | `deterministic-hitl-gate` | `0` | `0` | `$0` | **`$0.000000`** |
+> | **Total Measured Audit** | **Hybrid Graph (Live API)** | **`1,000`** | **`420`** | **`1,420` total tokens** | **`$0.000956` (`~$0.96` / 1K leaky PRs)** |
 
 ---
 
@@ -164,21 +175,21 @@ python -m mcpguard_adk.cli cost-sim --prs 1000
 
 We ran **MCPGuard-ADK v0.3.2** (`Stage 1` deterministic engine) side-by-side with **Gitleaks v8.30.1** (`gitleaks detect --no-git`) across **10 public MCP and Google ADK repositories (`12,372` non-test source & config files)**:
 
-**Summary:** **`10` repos scanned (`12,372` files) • `23` findings reported • `18` real issues (`78.3%` precision) • `5` false positives**
+**Summary:** **`10` repos scanned (`12,372` files) • `19` findings reported • `18` real issues (`94.7%` precision) • `1` false positive**
 
 | Public Repository | Commit | Files Scanned | MCPGuard Reported | Real Issues (TP) | False Alarms (FP) | Gitleaks v8.30.1 Alerts | What MCPGuard Caught (Manual Audit Notes) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- |
 | [`google/adk-python`](https://github.com/google/adk-python) | `90c3a29` | 2,034 | **16** | **15** | **1** | 13 *(test/mock keys)* | **15 TP**: `9` sample agents instantiate `McpToolset` without `tool_filter` (`MCPG-ADK-002`); `6` attach `McpToolset` directly to root `LlmAgent` without `AgentTool` isolation (`MCPG-ADK-003`). **1 FP**: `api_registry.py:193` helper factory returning `McpToolset`. |
 | [`mcp-use/mcp-use`](https://github.com/mcp-use/mcp-use) | `362b898` | 1,994 | **1** | **1** | **0** | 16 *(public PostHog/test keys)* | **1 TP**: `airbnb_mcp.json:5` runs unpinned `npx -y @openbnb/mcp-server-airbnb` (`MCPG-SEC-002`). |
 | [`idosal/git-mcp`](https://github.com/idosal/git-mcp) | `c487a29` | 165 | **2** | **2** | **0** | 0 | **2 TP**: `app/routes/_index.tsx:618,624` pass unescaped string `.replace()` HTML into `dangerouslySetInnerHTML` (`MCPG-SEC-004`, low exploitability with static props). |
-| [`jlowin/fastmcp`](https://github.com/jlowin/fastmcp) | `10083f7` | 1,402 | **2** | **0** | **2** | 0 | **2 FP**: `examples/memory.py:40,300` hardcoded `postgresql://postgres:postgres@localhost:54320` local Docker dev DSNs (`MCPG-SEC-003`). |
-| [`modelcontextprotocol/python-sdk`](https://github.com/modelcontextprotocol/python-sdk) | `77001c9` | 1,441 | **2** | **0** | **2** | 4 *(example/test keys)* | **2 FP**: `examples/mcpserver/memory.py:41,285` local `postgres:postgres@localhost:54320` Docker dev DSNs (`MCPG-SEC-003`). |
+| [`jlowin/fastmcp`](https://github.com/jlowin/fastmcp) | `10083f7` | 1,402 | **0** | **0** | **0** | 0 | Clean (local `postgres:postgres@localhost` Docker dev DSNs accurately ignored). |
+| [`modelcontextprotocol/python-sdk`](https://github.com/modelcontextprotocol/python-sdk) | `77001c9` | 1,441 | **0** | **0** | **0** | 4 *(example/test keys)* | Clean (local `postgres:postgres@localhost` Docker dev DSNs accurately ignored). |
 | [`modelcontextprotocol/servers`](https://github.com/modelcontextprotocol/servers) | `e1dc4b1` | 283 | **0** | **0** | **0** | 3 *(unit test tokens)* | Clean (`monorepo` workspace `"*"` sibling links accurately ignored). |
 | [`modelcontextprotocol/inspector`](https://github.com/modelcontextprotocol/inspector) | `488c30d` | 1,682 | **0** | **0** | **0** | 11 *(Storybook/test tokens)* | Clean. |
 | [`evalstate/fast-agent`](https://github.com/evalstate/fast-agent) | `fed14e0` | 1,883 | **0** | **0** | **0** | 34 *(benchmark JSON blobs)* | Clean. |
 | [`lastmile-ai/mcp-agent`](https://github.com/lastmile-ai/mcp-agent) | `f62d849` | 1,021 | **0** | **0** | **0** | 15 *(README/comment examples)* | Clean. |
 | [`cloudflare/mcp-server-cloudflare`](https://github.com/cloudflare/mcp-server-cloudflare) | `a21972e` | 467 | **0** | **0** | **0** | 0 | Clean. |
-| **Total (10 Public Repos)** | — | **12,372** | **23** | **18** | **5** | **96** | **Reproduce:** `python scripts/benchmark_public_repos.py` |
+| **Total (10 Public Repos)** | — | **12,372** | **19** | **18** | **1** | **96** | **Reproduce:** `python scripts/benchmark_public_repos.py` |
 
 ### Why Use MCPGuard-ADK Alongside Gitleaks?
 
@@ -276,7 +287,7 @@ python -m mcpguard_adk.cli pr-review . --git-diff --fail-on critical
 # Launch interactive browser visualizer (ADK 2.0 Graph + >200K Cliff Sliders)
 python -m mcpguard_adk.cli ui ./examples
 
-# Run the 24-test verification suite (AST, FinOps, fork-PR 403, PR git-diff, Ed25519, MCP, OTel)
+# Run the 25-test verification suite (AST, FinOps, fork-PR 403, PR git-diff, Ed25519, MCP, OTel)
 python -m pytest tests -v
 
 # Reproduce the 10-repository public MCP & Google ADK benchmark (+ optional Gitleaks comparison)
@@ -305,7 +316,7 @@ MCPGuard-ADK/
 ├── examples/                     # Deliberately vulnerable MCP config & uncompacted Pro loop for testing
 ├── scripts/                      # Reproducible 10-repo public MCP & ADK benchmark runner
 ├── evals/                        # ADK .test.json and multi-turn .evalset.json conformance suites
-├── tests/                        # 24 automated pytest suites
+├── tests/                        # 25 automated pytest suites
 ├── Dockerfile                    # Production container for Google Cloud Run
 └── cloudbuild.yaml               # Automated Google Cloud Build CI/CD pipeline
 ```

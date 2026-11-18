@@ -237,3 +237,22 @@ def test_git_diff_detects_committed_pr_branch_when_worktree_clean(tmp_path: Path
     assert any(Path(p).name == "mcp.json" for p in pf.scanned_files)
     assert len(pf.deterministic_findings) >= 2
 
+
+def test_localhost_default_docker_dsn_ignored_while_real_db_secrets_caught(tmp_path: Path) -> None:
+    from mcpguard_adk.nodes.prefilter import run_manifest_and_ast_prefilter
+
+    sample = tmp_path / "db_check"
+    sample.mkdir()
+    (sample / "local_dev.py").write_text(
+        'DB_DSN = "postgresql://postgres:postgres@localhost:54320/memory_db"\n',
+        encoding="utf-8",
+    )
+    (sample / "prod_leak.py").write_text(
+        'PROD_DSN = "postgresql://svc_user:Pr0dS3cret99@db.internal.example.com:5432/prod"\n',
+        encoding="utf-8",
+    )
+    pf = run_manifest_and_ast_prefilter(sample)
+    assert len(pf.deterministic_findings) == 1
+    assert Path(pf.deterministic_findings[0].file_path).name == "prod_leak.py"
+
+
