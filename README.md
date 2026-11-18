@@ -196,6 +196,17 @@ jobs:
           fail-on: "critical"
 ```
 
+#### Live GitHub Actions PR Verification Proof
+
+**A. Inline PR Review Table + Suggested Fix (`"/"` $\rightarrow$ `"./workspace"`):**
+![MCPGuard-ADK PR Bot Inline Suggestion](https://raw.githubusercontent.com/Chitresh-Bhatia-264/MCPGuard-ADK/main/docs/assets/pr_bot_inline_suggestion.jpg)
+
+**B. Failing Check (`exit 2`) Flagging a Vulnerable MCP PR:**
+![MCPGuard-ADK Failing Check on Vulnerable PR](https://raw.githubusercontent.com/Chitresh-Bhatia-264/MCPGuard-ADK/main/docs/assets/pr_bot_failing_check.png)
+
+**C. Clean PR Passing All Checks (`0` Billed LLM Tokens, `$0.00`):**
+![MCPGuard-ADK Clean PR Passing Checks](https://raw.githubusercontent.com/Chitresh-Bhatia-264/MCPGuard-ADK/main/docs/assets/pr_bot_clean_pass.jpg)
+
 ### 3. Cross-Framework A2A Protocol v1.0 Server (`Ed25519` + `RFC 8785 JCS`)
 ```bash
 # Start HTTP+JSON and Server-Sent Events (SSE) A2A v1.0 endpoint
