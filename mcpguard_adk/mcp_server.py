@@ -31,7 +31,7 @@ class MCPStdioServer:
 
     def __init__(self, audit_handler: Callable[..., Any]) -> None:
         self.server_name = "mcpguard-adk"
-        self.version = "0.3.1"
+        self.version = "0.3.2"
         self.protocol_version = "2024-11-05"
         self._audit_handler = audit_handler
 

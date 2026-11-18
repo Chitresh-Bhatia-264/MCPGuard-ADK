@@ -3,6 +3,7 @@
 **Open-source multi-agent Model Context Protocol (MCP) supply-chain, secret-leak, >200K token cost-cliff, and tool-trajectory auditor engineered on Google Agent Development Kit (ADK) 2.0, Agent2Agent (A2A) Protocol v1.0, and OpenTelemetry.**
 
 [![CI & Conformance](https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK/actions/workflows/ci.yml/badge.svg)](https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK/actions)
+[![PyPI version](https://img.shields.io/pypi/v/mcpguard-adk.svg)](https://pypi.org/project/mcpguard-adk/)
 ![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
 ![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg)
 ![Google ADK: v2.0](https://img.shields.io/badge/Google_ADK-v2.0-4285F4.svg)
@@ -17,7 +18,7 @@
   ██║   ██║  ██║╚██╔╝██║██║     ██╔═══╝ ██║   ██║██║   ██║██╔══██║██╔══██╗██║  ██║
   ╚██████╔╝  ██║ ╚═╝ ██║╚██████╗██║     ╚██████╔╝╚██████╔╝██║  ██║██║  ██║██████╔╝
    ✦ ADK 2    ╚═╝     ╚═╝ ╚═════╝╚═╝      ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ 
-   Google ADK 2.0 Hybrid Graph • A2A v1.0 Ed25519/JCS • Gemini FinOps • Cloud Trace OTLP v0.3.1
+   Google ADK 2.0 Hybrid Graph • A2A v1.0 Ed25519/JCS • Gemini FinOps • Cloud Trace OTLP v0.3.2
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ╭─ ✦ 0-TOK AST ──────╮  ╭─ ◆ RISK ALERTS ────╮  ╭─ ● SCAN SPEND ─────╮  ╭─ ▸ A2A v1.0 JWS ───╮
@@ -51,18 +52,52 @@
 
 ## 30-Second Quickstart (`$0` Offline Scan — No API Key Required)
 
-Run directly with **`uvx`** / **`pip`** on **Python 3.11+**, or install from source:
+Requires **Python 3.11+**. Choose your environment:
 
+### 1. Linux, macOS, or Active Virtualenv (`pip` / `uvx`)
 ```bash
-# Option A: Zero-install one-liner via uvx / pip (once published on PyPI, or directly from GitHub)
-uvx --from git+https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK mcpguard scan .
-# (After PyPI release: `pip install mcpguard-adk` or `uvx mcpguard-adk scan .`)
+pip install -U mcpguard-adk
+mcpguard scan .
 
-# Option B: Clone & run the built-in vulnerable examples + interactive shell
+# Or zero-install one-liner via uvx:
+uvx mcpguard-adk scan .
+```
+
+### 2. Windows CMD / PowerShell (Works Even When Python `Scripts` Is Not on `PATH`)
+```powershell
+python -m pip install -U mcpguard-adk
+python -m mcpguard_adk.cli scan "D:\your-project-folder"
+
+# Optional: install `mcpguard` globally onto Windows PATH via uv:
+uv tool install mcpguard-adk
+uv tool update-shell
+```
+
+### 3. Google Colab / Jupyter Notebooks *(Prefix shell commands with `!`)*
+```python
+!pip install -q mcpguard-adk
+!mcpguard scan .
+
+# Test on the built-in vulnerable MCP & >200K Pro loop examples:
+!git clone -q --depth 1 https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK.git
+!mcpguard scan MCPGuard-ADK/examples --finops-sim --live
+```
+
+### 4. Pure Python API (Scripts, CI Hooks, or Notebooks)
+```python
+from mcpguard_adk.agent import MCPGuardGraphWorkflow
+from mcpguard_adk.tui import render_rich_audit_report
+
+report = MCPGuardGraphWorkflow().run("./your-project-folder")
+print(render_rich_audit_report(report))
+```
+
+### 5. Local Source Install & Interactive Shell
+```bash
 git clone https://github.com/Chitresh-Bhatia-264/MCPGuard-ADK.git
 cd MCPGuard-ADK
 pip install -e ".[dev]"
-python -m mcpguard_adk.cli scan ./examples --live
+python -m mcpguard_adk.cli scan ./examples --finops-sim --live
 python -m mcpguard_adk.cli shell
 ```
 
@@ -127,7 +162,7 @@ python -m mcpguard_adk.cli cost-sim --prs 1000
 
 ## Empirical Benchmark: 10 Public MCP & Google ADK Repositories vs. Gitleaks
 
-We ran **MCPGuard-ADK v0.3.1** (`Stage 1` deterministic engine) side-by-side with **Gitleaks v8.30.1** (`gitleaks detect --no-git`) across **10 public MCP and Google ADK repositories (`12,372` non-test source & config files)**:
+We ran **MCPGuard-ADK v0.3.2** (`Stage 1` deterministic engine) side-by-side with **Gitleaks v8.30.1** (`gitleaks detect --no-git`) across **10 public MCP and Google ADK repositories (`12,372` non-test source & config files)**:
 
 **Summary:** **`10` repos scanned (`12,372` files) • `23` findings reported • `18` real issues (`78.3%` precision) • `5` false positives**
 
@@ -190,7 +225,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: Chitresh-Bhatia-264/MCPGuard-ADK@v0.3.1
+      - uses: Chitresh-Bhatia-264/MCPGuard-ADK@v0.3.2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fail-on: "critical"

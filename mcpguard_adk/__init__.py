@@ -1,6 +1,6 @@
 """MCPGuard-ADK: Multi-agent MCP supply-chain, >200K token cost-cliff, and tool-trajectory auditor."""
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 from mcpguard_adk.schemas import (
     AuditFinding,

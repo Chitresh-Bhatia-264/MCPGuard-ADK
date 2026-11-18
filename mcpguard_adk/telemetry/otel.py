@@ -83,7 +83,7 @@ class OtelTraceRecorder:
             resource = Resource.create(
                 {
                     "service.name": os.environ.get("OTEL_SERVICE_NAME", "mcpguard-adk"),
-                    "service.version": "0.3.1",
+                    "service.version": "0.3.2",
                     "telemetry.sdk.language": "python",
                     "gen_ai.system": "gcp.gemini",
                 }
@@ -91,7 +91,7 @@ class OtelTraceRecorder:
             provider = TracerProvider(resource=resource)
             self._sdk_exporter = InMemorySpanExporter()
             provider.add_span_processor(SimpleSpanProcessor(self._sdk_exporter))
-            self._tracer = provider.get_tracer("mcpguard_adk.telemetry", "0.3.1")
+            self._tracer = provider.get_tracer("mcpguard_adk.telemetry", "0.3.2")
 
     @contextmanager
     def span(
@@ -201,12 +201,12 @@ class OtelTraceRecorder:
                     "resource": {
                         "attributes": [
                             {"key": "service.name", "value": {"stringValue": "mcpguard-adk"}},
-                            {"key": "service.version", "value": {"stringValue": "0.3.1"}},
+                            {"key": "service.version", "value": {"stringValue": "0.3.2"}},
                         ]
                     },
                     "scopeSpans": [
                         {
-                            "scope": {"name": "mcpguard_adk.telemetry", "version": "0.3.1"},
+                            "scope": {"name": "mcpguard_adk.telemetry", "version": "0.3.2"},
                             "spans": otlp_spans,
                         }
                     ],
