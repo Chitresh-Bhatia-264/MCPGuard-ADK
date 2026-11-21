@@ -14,6 +14,7 @@ Engineered on **Google Agent Development Kit (ADK) 2.0**, **Agent2Agent (A2A) Pr
 ![A2A Protocol: v1.0 Ed25519](https://img.shields.io/badge/A2A_Protocol-v1.0_Ed25519-EA4335.svg)
 ![OpenTelemetry: OTLP v1/traces](https://img.shields.io/badge/OpenTelemetry-OTLP_v1%2Ftraces-34A853.svg)
 [![M8ven Score](https://m8ven.ai/badge/mcp/chitresh-bhatia-264-mcpguard-adk-hg6iv3?v=812dd7a01b9b7882022f9f875c9c49b0)](https://m8ven.ai/mcp/chitresh-bhatia-264-mcpguard-adk-hg6iv3?s=readme)
+[![M8ven Score](https://m8ven.ai/badge/mcp/chitresh-bhatia-264-mcpguard-adk-hg6iv3)](https://m8ven.ai/mcp/chitresh-bhatia-264-mcpguard-adk-hg6iv3?s=readme)
 
 [Quickstart](#-30-second-quickstart) •
 [Architecture](#-architecture-6-stage-google-adk-20-hybrid-graph) •
